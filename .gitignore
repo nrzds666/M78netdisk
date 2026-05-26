@@ -1,0 +1,27 @@
+# Compiled
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Temp
+temp/
+*.bat
+*.ps1
+check_repo.bat
+list_remote.bat
+
+# Storage (local file data, not code)
+storage/

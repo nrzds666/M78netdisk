@@ -1,0 +1,49 @@
+server:
+  port: 8080
+spring:
+  profiles:
+    active: dev
+  application:
+    name: m78-netdisk
+  datasource:
+    url: jdbc:mysql://192.168.191.130:3306/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=30000
+    username: root
+    password: ${DB_PASSWORD:942649}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  redis:
+    host: 192.168.191.130
+    port: 6379
+    timeout: 3000ms
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 500MB
+
+netdisk:
+  jwt:
+    secret: ${JWT_SECRET:M78NetdiskJwtSecretKeyMustBeAtLeast256BitsLongForHS256Algorithm!!}
+    issuer: m78-netdisk
+    access-token-expiration: 86400000        # 24小时
+    refresh-token-expiration: 2592000000     # 30天
+  default-quota: 10737418240                 # 10GB
+  storage:
+    type: local                               # local | oss — 切换存储后端
+    local-path: ${user.home}/m78netdisk/storage
+    oss:
+      endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
+      access-key-id: ${OSS_ACCESS_KEY_ID:LTAI5tRxr2ZBjDExX8KjkAk6}
+      access-key-secret: ${OSS_ACCESS_KEY_SECRET:LzZ7FOIJA1q7LkMW71DGz0P9tJiUzo}
+      bucket-name: ${OSS_BUCKET_NAME:dkd-nrzds}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+  mapper-locations:
+    - classpath*:mapper/**/*.xml

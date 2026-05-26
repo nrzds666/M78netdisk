@@ -1,0 +1,30 @@
+package com.m78.netdisk.user.domain.dto;
+
+import lombok.Data;
+
+import javax.validation.constraints.Email;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
+
+/**
+ * 注册 + 验证码
+ */
+@Data
+public class RegisterFormDTO {
+    @NotBlank(message = "用户名不能为空")
+    @Size(min = 2, max = 64, message = "用户名长度2-64个字符")
+    private String username;
+
+    @NotBlank(message = "密码不能为空")
+    @Size(min = 6, max = 72, message = "密码长度6-72个字符")
+    private String password;
+
+    @Email(message = "邮箱格式不正确")
+    private String email;
+
+    @NotBlank(message = "验证码key不能为空")
+    private String captchaKey;
+
+    @NotBlank(message = "验证码不能为空")
+    private String captchaCode;
+}
