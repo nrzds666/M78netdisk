@@ -10,4 +10,5 @@ public interface IShareService {
     IPage<ShareVO> listMyShares(Long ownerId, Integer pageNum, Integer size);
     ShareVO accessShare(String shareToken, String password);
     ShareVO downloadFromShare(String shareToken, String password);
+    IPage<ShareVO> listReceivedShares(Long userId, Integer pageNum, Integer size);
 }

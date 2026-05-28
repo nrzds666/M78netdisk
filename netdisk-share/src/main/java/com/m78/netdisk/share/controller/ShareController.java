@@ -41,4 +41,11 @@ public class ShareController {
                                    @RequestParam(required = false) String password) {
         return R.ok(shareService.accessShare(token, password));
     }
+
+    @GetMapping("/received")
+    public R<IPage<ShareVO>> receivedShares(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "20") Integer size) {
+        return R.ok(shareService.listReceivedShares(UserContext.getUserId(), page, size));
+    }
 }

@@ -16,8 +16,7 @@ public class CreateShareDTO {
 
     private String permission = "view";
 
-    @Positive(message = "过期时间必须为正数")
-    private Long expireHours;
+    private String expireType = "PERMANENT";
 
     @Positive(message = "最大下载次数必须为正数")
     private Integer maxDownloads;

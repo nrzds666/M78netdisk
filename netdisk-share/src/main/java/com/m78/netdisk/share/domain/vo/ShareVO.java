@@ -26,4 +26,10 @@ public class ShareVO {
     private Boolean isDirectory;
     private Long fileSize;
     private String mimeType;
+
+    // 过期标签
+    private String expireLabel;
+
+    // 分类标记
+    private Boolean isReceived;
 }

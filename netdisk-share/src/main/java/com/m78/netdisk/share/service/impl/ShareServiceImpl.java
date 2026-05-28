@@ -8,7 +8,10 @@ import com.m78.netdisk.common.exception.BizException;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.share.domain.dto.CreateShareDTO;
+import com.m78.netdisk.share.domain.enums.ShareExpire;
+import com.m78.netdisk.share.domain.po.ReceivedShare;
 import com.m78.netdisk.share.domain.po.Share;
+import com.m78.netdisk.share.mapper.ReceivedShareMapper;
 import com.m78.netdisk.share.domain.vo.ShareVO;
 import com.m78.netdisk.share.mapper.ShareMapper;
 import com.m78.netdisk.share.service.IShareService;
@@ -30,6 +33,7 @@ public class ShareServiceImpl implements IShareService {
     private final ShareMapper shareMapper;
     private final ItemMapper itemMapper;
     private final StringRedisTemplate redisTemplate;
+    private final ReceivedShareMapper receivedShareMapper;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Override
@@ -39,6 +43,11 @@ public class ShareServiceImpl implements IShareService {
         Item item = itemMapper.selectById(dto.getItemId());
         if (item == null || !item.getOwnerId().equals(ownerId)) {
             throw new BizException("文件不存在");
+        }
+
+        // 禁止分享机密文件箱内的文件
+        if (Boolean.TRUE.equals(item.getIsVaulted())) {
+            throw new BizException("\u673a\u5bc6\u6587\u4ef6\u7bb1\u4e2d\u7684\u6587\u4ef6\u65e0\u6cd5\u5206\u4eab");
         }
 
         String shareToken = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
@@ -62,8 +71,10 @@ public class ShareServiceImpl implements IShareService {
         if (StrUtil.isNotBlank(dto.getPassword())) {
             share.setPasswordHash(passwordEncoder.encode(dto.getPassword()));
         }
-        if (dto.getExpireHours() != null && dto.getExpireHours() > 0) {
-            share.setExpireAt(LocalDateTime.now().plusHours(dto.getExpireHours()));
+        // 根据 expireType 计算过期时间
+        ShareExpire expire = ShareExpire.fromType(dto.getExpireType());
+        if (expire.getHours() != null) {
+            share.setExpireAt(LocalDateTime.now().plusHours(expire.getHours()));
         }
 
         shareMapper.insert(share);
@@ -125,6 +136,20 @@ public class ShareServiceImpl implements IShareService {
         redisTemplate.delete(failKey);
         redisTemplate.delete(lockKey);
 
+        // 如果用户已登录且不是自己的分享，记录接收（幂等）
+        Long currentUserId = com.m78.netdisk.common.utils.UserContext.getUserId();
+        if (currentUserId != null && !currentUserId.equals(share.getOwnerId())) {
+            if (receivedShareMapper.countByUserAndShare(currentUserId, share.getId()) == 0) {
+                ReceivedShare rs = new ReceivedShare()
+                        .setUserId(currentUserId)
+                        .setShareId(share.getId())
+                        .setItemId(share.getItemId())
+                        .setOwnerId(share.getOwnerId())
+                        .setAccessToken(shareToken);
+                receivedShareMapper.insert(rs);
+            }
+        }
+
         return toShareVO(share);
     }
 
@@ -146,6 +171,20 @@ public class ShareServiceImpl implements IShareService {
     }
 
     private static final DateTimeFormatter ISO_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
+
+    @Override
+    public IPage<ShareVO> listReceivedShares(Long userId, Integer pageNum, Integer size) {
+        Page<ReceivedShare> page = new Page<>(pageNum, Math.min(size, 100));
+        return receivedShareMapper.selectByUserId(page, userId)
+                .convert(rs -> {
+                    Share share = shareMapper.selectById(rs.getShareId());
+                    ShareVO vo = toShareVO(share);
+                    if (vo != null) {
+                        vo.setIsReceived(true);
+                    }
+                    return vo;
+                });
+    }
 
     private ShareVO toShareVO(Share share) {
         if (share == null) return null;
@@ -180,6 +219,16 @@ public class ShareServiceImpl implements IShareService {
                 .isDirectory(isDirectory)
                 .fileSize(fileSize)
                 .mimeType(mimeType)
+                .expireLabel(determineExpireLabel(share.getExpireAt()))
+                .isReceived(false)
                 .build();
+    }
+
+    private String determineExpireLabel(LocalDateTime expireAt) {
+        if (expireAt == null) return "\u6c38\u4e45";
+        long hours = java.time.Duration.between(LocalDateTime.now(), expireAt).toHours();
+        if (hours <= 24) return "\u4e00\u5929";
+        if (hours <= 168) return "\u4e00\u5468";
+        return "\u4e00\u4e2a\u6708";
     }
 }
