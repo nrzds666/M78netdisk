@@ -2,7 +2,7 @@
 
 > 日期：2026-05-28
 > 作者：Hermes Agent
-> 状态：待审查
+> 状态：已审查
 
 ---
 
@@ -37,7 +37,7 @@ public enum ShareExpire {
 | expireHours | **删除** | Long | 被 expireType 取代 |
 | maxDownloads | 保留 | Integer | |
 | **expireType** | **新增** | String | `1D` / `1W` / `1M` / `PERMANENT` |
-| **expireLabel** | **新增** | String | 前端展示用："一天"、"一周"、"一个月"、"永久" |
+| expireLabel | VO字段 | String | 前端展示用，由后端从 expireType 推导 |
 
 **修改 `ShareServiceImpl.createShare()`：**
 - 根据 `expireType` 计算 `expireAt`：
@@ -79,7 +79,8 @@ CREATE INDEX idx_received_shares_user ON received_shares(user_id, accessed_at DE
 **新增 `ReceivedShareMapper`：** 提供分页查询和插入方法。
 
 **修改 `ShareServiceImpl.accessShare()`：**
-- `accessShare()` 成功后，检查 `received_shares` 表，若无则插入记录（幂等，UNIQUE 约束保证）
+- 访问分享 token 时，如果用户已登录（UserContext 有 userId），则在 `received_shares` 插入记录（幂等，UNIQUE 约束保证）
+- 未登录用户访问时不记录（后端兼容匿名访问场景，不强制登录）
 
 **新增 API：**
 
@@ -87,7 +88,7 @@ CREATE INDEX idx_received_shares_user ON received_shares(user_id, accessed_at DE
 |------|------|------|
 | GET | `/api/shares/received` | 分页查询用户接收的分享记录 |
 
-**改造 `ShareVO`：** 新增字段 `isReceived`（Boolean），`GET /mine` 返回 false，`GET /received` 返回 true。
+**改造 `ShareVO`：** 新增字段 `isReceived`（Boolean），`expireLabel`（String，由 `expireType` 推导："一天"、"一周"、"一个月"、"永久"），`GET /mine` 返回 false，`GET /received` 返回 true。
 
 **前端展示：** 两个 Tab / 分类：
 - "我的分享" → `/api/shares/mine`
@@ -157,7 +158,7 @@ public interface IVaultService {
 
 **安全设计：**
 - **Session 保持：** 解锁成功后在 Redis 存 `vault:unlock:{userId} = "1"`，TTL = 3600 秒
-- **Interceptor Check：** 新增 `VaultAccessInterceptor`，拦截 `/api/vault/**` 路径，校验 Redis unlock 标记
+- **Interceptor Check：** 新增 `VaultAccessInterceptor`，拦截 `/api/vault/files/**` 和 `/api/vault/lock` 路径，校验 Redis unlock 标记；`/api/vault/setup`、`/api/vault/unlock`、`/api/vault/status` 放行
 - **每次操作前自动校验：** 所有 vault 文件操作先检查 unlock 状态，未解锁返回 403
 
 **与其他模块的交互：**
@@ -188,9 +189,8 @@ POST /api/vault/unlock
 ```
 
 **修改 `WebConfig` 拦截器白名单：**
-- `/api/vault/setup` 和 `/api/vault/unlock` 放行
-- `/api/vault/**` 受 `VaultAccessInterceptor` 校验
-- `/api/shares/access/**` 仍放行
+- `/api/shares/access/**` 仍放行（匿名可访问）
+- Vault 的权限校验由 `VaultAccessInterceptor` 单独管理，不依赖 WebConfig 的 UserTokenInterceptor
 
 ---
 

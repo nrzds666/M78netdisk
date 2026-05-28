@@ -21,6 +21,8 @@
         <module>netdisk-user</module>
         <module>netdisk-file</module>
         <module>netdisk-share</module>
+        <module>netdisk-vault</module>
+        <module>netdisk-calendar</module>
         <module>netdisk-bootstrap</module>
     </modules>
 

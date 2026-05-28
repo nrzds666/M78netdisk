@@ -19,19 +19,20 @@
         <result column="is_deleted" property="isDeleted"/>
         <result column="deleted_at" property="deletedAt"/>
         <result column="version" property="version"/>
+        <result column="is_vaulted" property="isVaulted"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
     </resultMap>
 
     <select id="selectRootItems" resultMap="BaseResultMap">
         SELECT * FROM items
-        WHERE owner_id = #{ownerId} AND parent_id IS NULL AND NOT is_deleted
+        WHERE owner_id = #{ownerId} AND parent_id IS NULL AND NOT is_deleted AND NOT is_vaulted
         ORDER BY is_directory DESC, sort_order ASC, name ASC
     </select>
 
     <select id="selectChildren" resultMap="BaseResultMap">
         SELECT * FROM items
-        WHERE owner_id = #{ownerId} AND parent_id = #{parentId} AND NOT is_deleted
+        WHERE owner_id = #{ownerId} AND parent_id = #{parentId} AND NOT is_deleted AND NOT is_vaulted
         ORDER BY is_directory DESC, sort_order ASC, name ASC
     </select>
 

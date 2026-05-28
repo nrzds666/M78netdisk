@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS items (
     is_deleted    TINYINT(1) NOT NULL DEFAULT 0,
     deleted_at    DATETIME,
     version       INT NOT NULL DEFAULT 1,
+    is_vaulted    TINYINT(1) NOT NULL DEFAULT 0,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -75,6 +76,8 @@ CREATE INDEX idx_items_owner_deleted_at
     ON items(owner_id, deleted_at);
 CREATE INDEX idx_items_path
     ON items(path(255));
+CREATE INDEX idx_items_vaulted
+    ON items(owner_id, is_vaulted, parent_id);
 
 -- 文件版本历史
 CREATE TABLE IF NOT EXISTS item_versions (
@@ -119,6 +122,27 @@ CREATE TABLE IF NOT EXISTS shares (
 CREATE INDEX idx_shares_owner ON shares(owner_id);
 CREATE INDEX idx_shares_item ON shares(item_id);
 CREATE INDEX idx_shares_token ON shares(share_token);
+
+-- ============================================================
+-- 3b. 接收分享记录
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS received_shares (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT NOT NULL,
+    share_id      BIGINT NOT NULL,
+    item_id       BIGINT NOT NULL,
+    owner_id      BIGINT NOT NULL,
+    access_token  VARCHAR(32) NOT NULL,
+    accessed_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (user_id, share_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_received_shares_user ON received_shares(user_id, accessed_at DESC);
 
 -- ============================================================
 -- 4. 分片上传（断点续传）
@@ -202,6 +226,19 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
     is_active   TINYINT(1) NOT NULL DEFAULT 1,
     weight      INT NOT NULL DEFAULT 100,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- 7. 机密文件箱
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_vaults (
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id        BIGINT NOT NULL UNIQUE,
+    password_hash  VARCHAR(255) NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================

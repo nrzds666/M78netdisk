@@ -20,13 +20,19 @@ public interface ItemMapper extends BaseMapper<Item> {
                                @Param("parentId") Long parentId);
 
     @Select("SELECT COUNT(*) FROM items WHERE owner_id = #{ownerId} AND parent_id = #{parentId} " +
-            "AND name = #{name} AND NOT is_deleted")
+            "AND name = #{name} AND NOT is_deleted AND NOT is_vaulted")
     int countByName(@Param("ownerId") Long ownerId, @Param("parentId") Long parentId,
                     @Param("name") String name);
 
     @Select("SELECT COALESCE(SUM(size), 0) FROM items WHERE owner_id = #{ownerId} " +
             "AND NOT is_directory AND NOT is_deleted")
     long sumUsedBytesByOwner(@Param("ownerId") Long ownerId);
+
+    @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND is_vaulted " +
+            "AND (#{parentId} IS NULL AND parent_id IS NULL OR parent_id = #{parentId}) " +
+            "AND NOT is_deleted ORDER BY is_directory DESC, name ASC")
+    IPage<Item> selectVaultItems(Page<Item> page, @Param("ownerId") Long ownerId,
+                                 @Param("parentId") Long parentId);
 
     @Update("UPDATE items SET is_deleted = true, deleted_at = now() " +
             "WHERE id = #{id} AND owner_id = #{ownerId}")

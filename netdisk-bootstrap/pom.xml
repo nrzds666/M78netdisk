@@ -46,6 +46,16 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>com.m78</groupId>
+            <artifactId>netdisk-vault</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.m78</groupId>
+            <artifactId>netdisk-calendar</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>test</scope>

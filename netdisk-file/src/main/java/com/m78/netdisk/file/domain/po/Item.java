@@ -45,6 +45,8 @@ public class Item implements Serializable {
 
     private Integer version;
 
+    private Boolean isVaulted;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
