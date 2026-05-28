@@ -341,7 +341,7 @@ public class LunarCalendarUtil {
                 yiStr.contains("\u65b0\u5efa\u5206\u4eab"),
                 yiStr.contains("\u4e0a\u4f20\u6587\u4ef6"),
                 yiStr.contains("\u4e0b\u8f7d\u6587\u4ef6") || yiStr.contains("\u6536\u53d6\u4ed6\u4eba\u5206\u4eab"),
-                jiStr.contains("\u53d6\u6d88\u5206\u4eab")
+                yiStr.contains("\u53d6\u6d88\u5206\u4eab")
         );
     }
 
