@@ -12,7 +12,7 @@ public class SetupVaultDTO {
     private String loginPassword;
 
     @NotBlank(message = "保险箱密码不能为空")
-    @Size(min = 6, max = 32, message = "保险箱密码长度需在6-32位之间")
+    @Size(min = 6, max = 72, message = "保险箱密码长度需在6-72位之间")
     private String vaultPassword;
 
     @NotBlank(message = "确认密码不能为空")
