@@ -76,6 +76,7 @@ CREATE TABLE items (
     is_deleted    TINYINT(1) NOT NULL DEFAULT 0,    -- 软删除
     deleted_at    DATETIME,
     version       INT NOT NULL DEFAULT 1,            -- 当前版本号
+    is_vaulted    TINYINT(1) NOT NULL DEFAULT 0,    -- 1=机密文件箱内的文件
     created_at    DATETIME NOT NULL DEFAULT now(),
     updated_at    DATETIME NOT NULL DEFAULT now(),
 
@@ -89,6 +90,7 @@ CREATE INDEX idx_items_owner_parent_deleted ON items(owner_id, parent_id, is_del
 CREATE INDEX idx_items_owner_parent_dir ON items(owner_id, parent_id, is_directory);
 CREATE INDEX idx_items_storage_key ON items(storage_key);
 CREATE INDEX idx_items_deleted_at ON items(owner_id, deleted_at);
+CREATE INDEX idx_items_vaulted ON items(owner_id, is_vaulted, parent_id);
 ```
 
 ### item_versions — 文件版本历史
@@ -132,6 +134,22 @@ CREATE TABLE shares (
 CREATE INDEX idx_shares_owner ON shares(owner_id);
 CREATE INDEX idx_shares_item ON shares(item_id);
 CREATE INDEX idx_shares_token ON shares(share_token);
+```
+
+### received_shares — 接收的分享记录
+
+```sql
+CREATE TABLE received_shares (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    share_id      BIGINT NOT NULL REFERENCES shares(id) ON DELETE CASCADE,
+    item_id       BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    owner_id      BIGINT NOT NULL,                     -- 分享者（原文件所有者）
+    access_token  VARCHAR(32) NOT NULL,
+    accessed_at   DATETIME NOT NULL DEFAULT now(),
+    UNIQUE (user_id, share_id)
+);
+CREATE INDEX idx_received_shares_user ON received_shares(user_id, accessed_at DESC);
 ```
 
 ---
@@ -225,6 +243,21 @@ CREATE TABLE storage_nodes (
     is_active   TINYINT(1) NOT NULL DEFAULT 1,
     weight      INT NOT NULL DEFAULT 100,             -- 调度权重
     created_at  DATETIME NOT NULL DEFAULT now()
+);
+```
+
+---
+
+## 8. 机密文件箱
+
+### user_vaults — 保险箱密码
+
+```sql
+CREATE TABLE user_vaults (
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id        BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    password_hash  VARCHAR(255) NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT now()
 );
 ```
 

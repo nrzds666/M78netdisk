@@ -310,7 +310,6 @@ public class VaultServiceImpl implements IVaultService {
                 .mimeType(item.getMimeType())
                 .etag(item.getEtag())
                 .path(item.getPath())
-                .isDeleted(item.getIsDeleted())
                 .version(item.getVersion())
                 .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
                 .updatedAt(item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null)
