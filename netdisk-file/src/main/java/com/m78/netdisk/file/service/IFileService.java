@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.file.domain.dto.*;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
+import com.m78.netdisk.file.domain.vo.MediaProgressVO;
 import com.m78.netdisk.file.domain.vo.UploadTaskVO;
 import com.m78.netdisk.file.domain.vo.ZipResult;
 
@@ -59,4 +60,21 @@ public interface IFileService {
      * @return ZipResult（包含 ZipOutputStream 封装信息）
      */
     ZipResult getFolderZip(Long ownerId, Long folderId);
+
+    /**
+     * 获取媒体文件播放进度
+     * @param ownerId 用户ID
+     * @param itemId  媒体文件ID
+     * @return MediaProgressVO
+     */
+    MediaProgressVO getProgress(Long userId, Long itemId);
+
+    /**
+     * 保存媒体文件播放进度
+     * @param ownerId 用户ID
+     * @param itemId  媒体文件ID
+     * @param dto     进度信息
+     * @return MediaProgressVO
+     */
+    MediaProgressVO saveProgress(Long userId, Long itemId, SaveProgressDTO dto);
 }

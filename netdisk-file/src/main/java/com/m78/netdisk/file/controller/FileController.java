@@ -7,6 +7,7 @@ import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.dto.*;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
+import com.m78.netdisk.file.domain.vo.MediaProgressVO;
 import com.m78.netdisk.file.domain.vo.UploadTaskVO;
 import com.m78.netdisk.file.domain.vo.ZipResult;
 import com.m78.netdisk.file.service.IFileService;
@@ -203,6 +204,23 @@ public class FileController {
             }
             out.flush();
         }
+    }
+
+    /**
+     * 获取媒体文件播放进度
+     */
+    @GetMapping("/progress/{itemId}")
+    public R<MediaProgressVO> getProgress(@PathVariable Long itemId) {
+        return R.ok(fileService.getProgress(UserContext.getUserId(), itemId));
+    }
+
+    /**
+     * 保存媒体文件播放进度
+     */
+    @PutMapping("/progress/{itemId}")
+    public R<MediaProgressVO> saveProgress(@PathVariable Long itemId,
+                                           @Valid @RequestBody SaveProgressDTO dto) {
+        return R.ok(fileService.saveProgress(UserContext.getUserId(), itemId, dto));
     }
 
     /**

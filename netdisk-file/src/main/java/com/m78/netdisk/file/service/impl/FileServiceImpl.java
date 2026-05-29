@@ -8,14 +8,17 @@ import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.dto.*;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.domain.po.ItemVersion;
+import com.m78.netdisk.file.domain.po.MediaProgress;
 import com.m78.netdisk.file.domain.po.UploadChunk;
 import com.m78.netdisk.file.domain.po.UploadTask;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
+import com.m78.netdisk.file.domain.vo.MediaProgressVO;
 import com.m78.netdisk.file.domain.vo.UploadTaskVO;
 import com.m78.netdisk.file.domain.vo.ZipResult;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.file.mapper.ItemVersionMapper;
+import com.m78.netdisk.file.mapper.MediaProgressMapper;
 import com.m78.netdisk.file.mapper.UploadChunkMapper;
 import com.m78.netdisk.file.mapper.UploadTaskMapper;
 import com.m78.netdisk.file.service.IFileService;
@@ -46,6 +49,7 @@ public class FileServiceImpl implements IFileService {
     private final UploadChunkMapper uploadChunkMapper;
     private final StorageService storageService;
     private final UserMapper userMapper;
+    private final MediaProgressMapper mediaProgressMapper;
 
     // ==================== 文件/文件夹 CRUD ====================
 
@@ -645,6 +649,68 @@ public class FileServiceImpl implements IFileService {
         }
     }
 
+    // ==================== 媒体进度追踪 ====================
+
+    @Override
+    public MediaProgressVO getProgress(Long userId, Long itemId) {
+        Item item = itemMapper.selectById(itemId);
+        validateOwner(item, userId);
+
+        String mimeType = item.getMimeType();
+        if (mimeType == null || !(mimeType.startsWith("video/") || mimeType.startsWith("audio/") || mimeType.startsWith("image/"))) {
+            throw new BizException("不是媒体文件");
+        }
+
+        MediaProgress mp = mediaProgressMapper.selectOne(
+                new LambdaQueryWrapper<MediaProgress>()
+                        .eq(MediaProgress::getUserId, userId)
+                        .eq(MediaProgress::getItemId, itemId));
+        if (mp == null) {
+            return MediaProgressVO.builder()
+                    .itemId(itemId)
+                    .progressSeconds(0)
+                    .totalDuration(0)
+                    .finished(false)
+                    .build();
+        }
+        return toMediaProgressVO(mp);
+    }
+
+    @Override
+    public MediaProgressVO saveProgress(Long userId, Long itemId, SaveProgressDTO dto) {
+        Item item = itemMapper.selectById(itemId);
+        validateOwner(item, userId);
+
+        String mimeType = item.getMimeType();
+        if (mimeType == null || !(mimeType.startsWith("video/") || mimeType.startsWith("audio/") || mimeType.startsWith("image/"))) {
+            throw new BizException("不是媒体文件");
+        }
+
+        MediaProgress mp = mediaProgressMapper.selectOne(
+                new LambdaQueryWrapper<MediaProgress>()
+                        .eq(MediaProgress::getUserId, userId)
+                        .eq(MediaProgress::getItemId, itemId));
+
+        boolean finished = dto.getFinished() != null ? dto.getFinished() : false;
+
+        if (mp == null) {
+            mp = new MediaProgress()
+                    .setUserId(userId)
+                    .setItemId(itemId)
+                    .setProgressSeconds(dto.getProgressSeconds())
+                    .setTotalDuration(dto.getTotalDuration())
+                    .setFinished(finished);
+            mediaProgressMapper.insert(mp);
+        } else {
+            mp.setProgressSeconds(dto.getProgressSeconds())
+                    .setTotalDuration(dto.getTotalDuration())
+                    .setFinished(finished);
+            mediaProgressMapper.updateById(mp);
+        }
+
+        return toMediaProgressVO(mp);
+    }
+
     // ==================== 辅助 ====================
 
     private void validateOwner(Item item, Long ownerId) {
@@ -683,6 +749,17 @@ public class FileServiceImpl implements IFileService {
                 .receivedChunks(task.getReceivedChunks()).status(task.getStatus())
                 .storagePrefix(task.getStoragePrefix())
                 .expiresAt(task.getExpiresAt() != null ? task.getExpiresAt().toString() : null)
+                .build();
+    }
+
+    private MediaProgressVO toMediaProgressVO(MediaProgress mp) {
+        if (mp == null) return null;
+        return MediaProgressVO.builder()
+                .itemId(mp.getItemId())
+                .progressSeconds(mp.getProgressSeconds())
+                .totalDuration(mp.getTotalDuration())
+                .finished(mp.getFinished())
+                .updatedAt(mp.getUpdatedAt() != null ? mp.getUpdatedAt().toString() : null)
                 .build();
     }
 
