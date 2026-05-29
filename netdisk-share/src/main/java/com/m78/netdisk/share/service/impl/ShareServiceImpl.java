@@ -5,7 +5,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.m78.netdisk.common.exception.BizException;
+import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.po.Item;
+import com.m78.netdisk.file.domain.vo.FileDownloadVO;
+import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.share.domain.dto.CreateShareDTO;
 import com.m78.netdisk.share.domain.enums.ShareExpire;
@@ -20,8 +23,11 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +40,7 @@ public class ShareServiceImpl implements IShareService {
     private final ItemMapper itemMapper;
     private final StringRedisTemplate redisTemplate;
     private final ReceivedShareMapper receivedShareMapper;
+    private final StorageService storageService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Override
@@ -170,6 +177,160 @@ public class ShareServiceImpl implements IShareService {
         return toShareVO(share);
     }
 
+    // ==================== Share Item Browsing ====================
+
+    @Override
+    public IPage<ItemVO> listShareItems(String shareToken, String password,
+                                         Long parentId, Integer pageNum, Integer size) {
+        // Verify share access
+        ShareVO vo = accessShare(shareToken, password);
+        Share share = shareMapper.selectValidShare(shareToken);
+        if (share == null) {
+            throw new BizException("分享链接不存在或已失效");
+        }
+
+        Long ownerId = share.getOwnerId();
+        Long sharedItemId = share.getItemId();
+
+        // Get the shared item to check if it's a file or folder
+        Item sharedItem = itemMapper.selectById(sharedItemId);
+        if (sharedItem == null) {
+            throw new BizException("分享的文件不存在");
+        }
+
+        Page<Item> page = new Page<>(pageNum, Math.min(size, 100));
+
+        if (!sharedItem.getIsDirectory()) {
+            // Single file share — return just that file
+            IPage<Item> singleResult = new Page<>(1, 1);
+            List<Item> items = new ArrayList<>();
+            items.add(sharedItem);
+            singleResult.setRecords(items);
+            singleResult.setTotal(1);
+            return singleResult.convert(this::itemToItemVO);
+        }
+
+        // Folder share — list children of the shared folder or subfolder
+        Long effectiveParentId = (parentId != null && parentId > 0) ? parentId : sharedItemId;
+
+        IPage<Item> itemPage = itemMapper.selectChildrenByOwnerId(page, ownerId, effectiveParentId);
+        return itemPage.convert(this::itemToItemVO);
+    }
+
+    // ==================== Share File Download ====================
+
+    @Override
+    public FileDownloadVO getShareDownloadInfo(String shareToken, String password, Long itemId) {
+        // Verify share access
+        accessShare(shareToken, password);
+        Share share = shareMapper.selectValidShare(shareToken);
+        if (share == null) {
+            throw new BizException("分享链接不存在或已失效");
+        }
+
+        // Check permission: must allow download
+        if (!"download".equals(share.getPermission()) && !"edit".equals(share.getPermission())) {
+            throw new BizException("该分享链接不允许下载");
+        }
+
+        // Validate the item belongs to the share owner and is part of this share
+        Item item = itemMapper.selectById(itemId);
+        if (item == null || !item.getOwnerId().equals(share.getOwnerId())) {
+            throw new BizException("文件不存在");
+        }
+        if (item.getIsDirectory()) {
+            throw new BizException("不支持下载文件夹");
+        }
+        if (item.getIsDeleted() != null && item.getIsDeleted()) {
+            throw new BizException("文件已被删除");
+        }
+
+        // Verify item is a descendant of the shared folder (or is the shared file itself)
+        if (!isDescendantOf(share.getOwnerId(), itemId, share.getItemId())) {
+            throw new BizException("文件不属于该分享");
+        }
+
+        // Increment download count
+        shareMapper.incrementDownloadCount(share.getId());
+
+        return FileDownloadVO.builder()
+                .storageKey(item.getStorageKey())
+                .fileName(item.getName())
+                .mimeType(item.getMimeType() != null ? item.getMimeType() : "application/octet-stream")
+                .fileSize(item.getSize())
+                .build();
+    }
+
+    // ==================== Save Shared Files ====================
+
+    @Override
+    @Transactional
+    public List<ItemVO> saveShareFiles(String shareToken, String password, List<Long> itemIds) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new BizException("请选择要保存的文件");
+        }
+
+        // Verify share access
+        accessShare(shareToken, password);
+        Share share = shareMapper.selectValidShare(shareToken);
+        if (share == null) {
+            throw new BizException("分享链接不存在或已失效");
+        }
+
+        Long currentUserId = com.m78.netdisk.common.utils.UserContext.getUserId();
+        if (currentUserId == null) {
+            throw new BizException("用户未登录");
+        }
+
+        List<ItemVO> result = new ArrayList<>();
+
+        for (Long itemId : itemIds) {
+            Item original = itemMapper.selectById(itemId);
+            if (original == null || !original.getOwnerId().equals(share.getOwnerId())) {
+                throw new BizException("文件不存在: " + itemId);
+            }
+            if (original.getIsDirectory()) {
+                throw new BizException("暂不支持保存文件夹，请选择具体文件: " + original.getName());
+            }
+            if (original.getIsDeleted() != null && original.getIsDeleted()) {
+                throw new BizException("文件已被删除: " + original.getName());
+            }
+
+            // Verify item is part of this share
+            if (!isDescendantOf(share.getOwnerId(), itemId, share.getItemId())) {
+                throw new BizException("文件不属于该分享: " + original.getName());
+            }
+
+            // Copy the file content to a new storage key
+            String newStorageKey = "saves/" + UUID.randomUUID().toString().replace("-", "")
+                    + "/" + original.getName();
+
+            try (InputStream in = storageService.getInputStream(original.getStorageKey())) {
+                storageService.store(newStorageKey, in);
+            } catch (Exception e) {
+                throw new BizException("保存文件失败: " + original.getName(), e);
+            }
+
+            // Create a new Item record for the current user
+            Item newItem = new Item()
+                    .setOwnerId(currentUserId)
+                    .setParentId(null) // saved to root
+                    .setName(original.getName())
+                    .setIsDirectory(false)
+                    .setSize(original.getSize())
+                    .setMimeType(original.getMimeType())
+                    .setStorageKey(newStorageKey)
+                    .setPath("/" + original.getName())
+                    .setVersion(1)
+                    .setIsFromShare(true);
+
+            itemMapper.insert(newItem);
+            result.add(itemToItemVO(newItem));
+        }
+
+        return result;
+    }
+
     private static final DateTimeFormatter ISO_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
     @Override
@@ -225,10 +386,39 @@ public class ShareServiceImpl implements IShareService {
     }
 
     private String determineExpireLabel(LocalDateTime expireAt) {
-        if (expireAt == null) return "\u6c38\u4e45";
+        if (expireAt == null) return "永久";
         long hours = java.time.Duration.between(LocalDateTime.now(), expireAt).toHours();
-        if (hours <= 24) return "\u4e00\u5929";
-        if (hours <= 168) return "\u4e00\u5468";
-        return "\u4e00\u4e2a\u6708";
+        if (hours <= 24) return "一天";
+        if (hours <= 168) return "一周";
+        return "一个月";
+    }
+
+    private ItemVO itemToItemVO(Item item) {
+        if (item == null) return null;
+        return ItemVO.builder()
+                .id(item.getId()).ownerId(item.getOwnerId()).parentId(item.getParentId())
+                .name(item.getName()).isDirectory(item.getIsDirectory()).size(item.getSize())
+                .mimeType(item.getMimeType()).etag(item.getEtag()).thumbnailKey(item.getThumbnailKey())
+                .path(item.getPath()).version(item.getVersion()).isFromShare(item.getIsFromShare())
+                .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
+                .updatedAt(item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null)
+                .build();
+    }
+
+    /**
+     * Check if potentialChildId is a descendant of (or equal to) ancestorId,
+     * where all items belong to the same ownerId.
+     */
+    private boolean isDescendantOf(Long ownerId, Long potentialChildId, Long ancestorId) {
+        if (potentialChildId.equals(ancestorId)) return true;
+        Long currentId = potentialChildId;
+        while (currentId != null) {
+            if (currentId.equals(ancestorId)) return true;
+            Item current = itemMapper.selectById(currentId);
+            if (current == null || current.getParentId() == null) break;
+            if (!current.getOwnerId().equals(ownerId)) return false;
+            currentId = current.getParentId();
+        }
+        return false;
     }
 }
