@@ -362,6 +362,22 @@ public class FileServiceImpl implements IFileService {
         return itemMapper.selectTrash(page, ownerId).convert(this::toItemVO);
     }
 
+    @Override
+    public List<ItemVO> listRecentItems(Long userId, Integer days) {
+        return itemMapper.selectRecentItems(userId, days)
+                .stream()
+                .map(this::toItemVO)
+                .toList();
+    }
+
+    @Override
+    public List<ItemVO> listRecentSaves(Long userId, Integer days) {
+        return itemMapper.selectRecentSaves(userId, days)
+                .stream()
+                .map(this::toItemVO)
+                .toList();
+    }
+
     // ==================== 分片上传 ====================
 
     @Override

@@ -50,4 +50,15 @@ public interface ItemMapper extends BaseMapper<Item> {
 
     @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND parent_id IS NULL AND NOT is_deleted ORDER BY is_directory DESC, name ASC")
     IPage<Item> selectRootItemsByOwnerId(Page<?> page, @Param("ownerId") Long ownerId);
+
+    @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND NOT is_deleted AND NOT is_directory " +
+            "AND created_at >= DATE_SUB(NOW(), INTERVAL #{days} DAY) " +
+            "ORDER BY created_at DESC LIMIT 20")
+    List<Item> selectRecentItems(@Param("ownerId") Long ownerId, @Param("days") Integer days);
+
+    @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND NOT is_deleted AND NOT is_directory " +
+            "AND is_from_share = 1 " +
+            "AND created_at >= DATE_SUB(NOW(), INTERVAL #{days} DAY) " +
+            "ORDER BY created_at DESC LIMIT 20")
+    List<Item> selectRecentSaves(@Param("ownerId") Long ownerId, @Param("days") Integer days);
 }

@@ -77,4 +77,8 @@ public interface IFileService {
      * @return MediaProgressVO
      */
     MediaProgressVO saveProgress(Long userId, Long itemId, SaveProgressDTO dto);
+
+    List<ItemVO> listRecentItems(Long userId, Integer days);
+
+    List<ItemVO> listRecentSaves(Long userId, Integer days);
 }

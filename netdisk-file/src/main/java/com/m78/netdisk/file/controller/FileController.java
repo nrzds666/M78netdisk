@@ -86,6 +86,16 @@ public class FileController {
         return R.ok(fileService.listTrash(UserContext.getUserId(), page, size));
     }
 
+    @GetMapping("/recent")
+    public R<List<ItemVO>> listRecentItems(@RequestParam(defaultValue = "3") Integer days) {
+        return R.ok(fileService.listRecentItems(UserContext.getUserId(), days));
+    }
+
+    @GetMapping("/recent-saves")
+    public R<List<ItemVO>> listRecentSaves(@RequestParam(defaultValue = "3") Integer days) {
+        return R.ok(fileService.listRecentSaves(UserContext.getUserId(), days));
+    }
+
     @PostMapping("/upload/init")
     public R<UploadTaskVO> initUpload(@Valid @RequestBody InitUploadDTO dto) {
         return R.ok(fileService.initUpload(UserContext.getUserId(), dto));
