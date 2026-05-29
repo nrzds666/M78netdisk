@@ -32,4 +32,7 @@ public class ShareVO {
 
     // 分类标记
     private Boolean isReceived;
+
+    // 来源标记：是否为接收的分享文件
+    private Boolean isFromShare;
 }
