@@ -93,6 +93,9 @@ public class JwtTool {
     }
 
     public Long parseToken(String token) {
+        if (StrUtil.isBlank(token)) {
+            throw new BizException(401, "令牌不能为空");
+        }
         try {
             Jws<Claims> jws = Jwts.parser()
                     .verifyWith(getSigningKey())
