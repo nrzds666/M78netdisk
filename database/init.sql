@@ -242,5 +242,62 @@ CREATE TABLE IF NOT EXISTS user_vaults (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================
+-- 8. 媒体播放进度
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS media_progress (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT NOT NULL,
+    item_id          BIGINT NOT NULL,
+    progress_seconds INT NOT NULL DEFAULT 0,
+    total_duration   INT NOT NULL DEFAULT 0,
+    finished         TINYINT(1) NOT NULL DEFAULT 0,
+    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE (user_id, item_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_media_progress_user ON media_progress(user_id);
+CREATE INDEX idx_media_progress_item ON media_progress(item_id);
+
+
+-- ============================================================
+-- 9. 相册
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS albums (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT NOT NULL,
+    name          VARCHAR(128) NOT NULL,
+    cover_item_id BIGINT,
+    description   TEXT,
+    sort_order    INT NOT NULL DEFAULT 0,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (cover_item_id) REFERENCES items(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_albums_user ON albums(user_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS album_items (
+    id        BIGINT AUTO_INCREMENT PRIMARY KEY,
+    album_id  BIGINT NOT NULL,
+    item_id   BIGINT NOT NULL,
+    added_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (album_id, item_id),
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_album_items_album ON album_items(album_id, added_at DESC);
+CREATE INDEX idx_album_items_item ON album_items(item_id);
+
+
+-- ============================================================
 -- 完成
 -- ============================================================
