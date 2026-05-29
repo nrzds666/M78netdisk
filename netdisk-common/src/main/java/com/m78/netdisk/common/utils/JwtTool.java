@@ -4,7 +4,8 @@ import cn.hutool.core.util.StrUtil;
 import com.m78.netdisk.common.exception.BizException;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
-import lombok.Data;
+import lombok.Getter;
+import lombok.ToString;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -16,7 +17,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@Data
+@Getter
+@ToString
 public class JwtTool {
 
     @Value("${netdisk.jwt.secret}")

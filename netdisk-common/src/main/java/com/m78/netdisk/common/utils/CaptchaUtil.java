@@ -42,6 +42,9 @@ public class CaptchaUtil {
      * 生成字符验证码，返回图片 base64 和 key
      */
     public CaptchaResult generateSpec(int len) {
+        if (len <= 0) {
+            throw new IllegalArgumentException("验证码长度必须大于0");
+        }
         SpecCaptcha captcha = new SpecCaptcha(130, 48, len);
         String code = captcha.text().toLowerCase();
         String key = nextKey();
