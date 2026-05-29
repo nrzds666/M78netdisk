@@ -367,7 +367,7 @@ public class FileServiceImpl implements IFileService {
         return itemMapper.selectRecentItems(userId, days)
                 .stream()
                 .map(this::toItemVO)
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @Override
@@ -375,7 +375,7 @@ public class FileServiceImpl implements IFileService {
         return itemMapper.selectRecentSaves(userId, days)
                 .stream()
                 .map(this::toItemVO)
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 
     // ==================== 分片上传 ====================
