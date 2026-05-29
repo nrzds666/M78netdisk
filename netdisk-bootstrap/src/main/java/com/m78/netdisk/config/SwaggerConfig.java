@@ -71,4 +71,12 @@ public class SwaggerConfig {
                 .pathsToMatch("/api/vault/**")
                 .build();
     }
+
+    @Bean
+    public GroupedOpenApi albumApi() {
+        return GroupedOpenApi.builder()
+                .group("相册模块")
+                .pathsToMatch("/api/albums/**")
+                .build();
+    }
 }

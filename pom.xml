@@ -23,6 +23,7 @@
         <module>netdisk-share</module>
         <module>netdisk-vault</module>
         <module>netdisk-calendar</module>
+        <module>netdisk-album</module>
         <module>netdisk-bootstrap</module>
     </modules>
 
