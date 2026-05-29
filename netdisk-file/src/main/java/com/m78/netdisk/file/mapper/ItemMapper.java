@@ -43,4 +43,11 @@ public interface ItemMapper extends BaseMapper<Item> {
     int restore(@Param("id") Long id, @Param("ownerId") Long ownerId);
 
     IPage<Item> selectTrash(Page<Item> page, @Param("ownerId") Long ownerId);
+
+    @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND parent_id = #{parentId} AND NOT is_deleted ORDER BY is_directory DESC, name ASC")
+    IPage<Item> selectChildrenByOwnerId(Page<?> page, @Param("ownerId") Long ownerId,
+                                         @Param("parentId") Long parentId);
+
+    @Select("SELECT * FROM items WHERE owner_id = #{ownerId} AND parent_id IS NULL AND NOT is_deleted ORDER BY is_directory DESC, name ASC")
+    IPage<Item> selectRootItemsByOwnerId(Page<?> page, @Param("ownerId") Long ownerId);
 }
