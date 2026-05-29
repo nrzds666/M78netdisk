@@ -27,22 +27,7 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 ```
 
-### user_tokens — 登录令牌 / API Token
-
-```sql
-CREATE TABLE user_tokens (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      VARCHAR(64) NOT NULL UNIQUE,
-    type       VARCHAR(20) NOT NULL DEFAULT 'access',
-    -- type: access, refresh, api
-    expires_at DATETIME,
-    created_at DATETIME NOT NULL DEFAULT now()
-);
-CREATE INDEX idx_user_tokens_user_id ON user_tokens(user_id);
-```
-
----
+|---
 
 ## 2. 文件与文件夹（核心存储）
 
