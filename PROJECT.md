@@ -9,14 +9,7 @@
 
 ## 模块结构
 
-```
-m78-netdisk (根 POM)
-├── netdisk-bootstrap   — 启动入口、全局配置
-├── netdisk-common      — 公共工具、响应体、异常处理
-├── netdisk-file        — 文件/文件夹 CRUD、分片上传
-├── netdisk-share       — 分享链接管理
-└── netdisk-user        — 用户注册登录、拦截器
-```
+```\nm78-netdisk (根 POM)\n├── netdisk-bootstrap   — 启动入口、全局配置、Swagger 聚合\n├── netdisk-common      — 公共工具、响应体、异常处理、存储节点管理\n├── netdisk-file        — 文件/文件夹 CRUD、分片上传、媒体播放进度\n├── netdisk-share       — 分享链接管理、接收分享、分享内容浏览/下载/保存\n├── netdisk-user        — 用户注册登录、拦截器\n├── netdisk-vault       — 机密文件箱（密码保护、独立浏览/上传/下载）\n├── netdisk-calendar    — 日历模块（农历/黄历/宜忌/分享吉日）\n└── netdisk-album       — 相册模块（创建相册、增删照片、设置封面）\n```
 
 ---
 
@@ -25,13 +18,18 @@ m78-netdisk (根 POM)
 | 表名 | 用途 | 说明 |
 |------|------|------|
 | `users` | 用户 | 用户名/密码/邮箱/配额 |
-| `items` | 文件&文件夹 | 树形结构（parent_id）、软删除 |
+| `items` | 文件&文件夹 | 树形结构（parent_id）、软删除、is_vaulted、is_from_share |
 | `item_versions` | 文件版本历史 | 每次覆盖保存一个版本 |
 | `shares` | 分享链接 | 可设密码/时效/下载次数 |
+| `received_shares` | 接收的分享记录 | 用户访问分享时的自动记录 |
 | `upload_tasks` | 分片上传任务 | 断点续传状态追踪 |
 | `upload_chunks` | 已上传分片记录 | 每片 etag/storage_key |
 | `operation_logs` | 操作审计日志 | JSONB 详情 |
 | `storage_nodes` | 存储后端节点 | 支持多后端扩展 |
+| `user_vaults` | 机密文件箱密码 | 每个用户一条，BCrypt 哈希 |
+| `media_progress` | 媒体播放进度 | 视频/音频进度秒数 + 完成标志 |
+| `albums` | 相册 | 名称/封面/描述/排序 |
+| `album_items` | 相册-文件关联 | N:M 关系，unique(album_id, item_id) |
 
 ---
 
@@ -60,6 +58,8 @@ m78-netdisk (根 POM)
 | GET | `/api/files/download/{id}` | 下载文件（支持 Range 断点续传） | ❌ |
 | GET | `/api/files/preview/{id}` | 预览文件（浏览器内联展示） | ❌ |
 | GET | `/api/files/download/folder/{id}` | 下载文件夹（ZIP 打包，保持目录结构） | ❌ |
+| GET | `/api/files/progress/{itemId}` | 读取媒体播放进度（视频/音频） | ❌ |
+| PUT | `/api/files/progress/{itemId}` | 保存媒体播放进度 | ❌ |
 
 ### 分享模块 — `netdisk-share`
 
@@ -71,6 +71,49 @@ m78-netdisk (根 POM)
 | POST | `/api/shares/{id}/cancel` | 取消分享 | ❌ |
 | GET | `/api/shares/mine` | 我的分享列表 | ✅ |
 | GET | `/api/shares/access/{token}` | 访问分享 | ❌ |
+| GET | `/api/shares/received` | 我接收的分享记录 | ✅ |
+| GET | `/api/shares/access/{token}/items` | 浏览分享文件夹内容 | ✅ |
+| GET | `/api/shares/access/{token}/download` | 从分享中下载文件 | ❌ |
+| POST | `/api/shares/access/{token}/save` | 保存分享文件到自己的存储 | ❌ |
+
+### 机密文件箱模块 — `netdisk-vault`
+
+**接口前缀: `/api/vault`**
+
+| 方法 | 路径 | 说明 | 需分页 |
+|------|------|------|--------|
+| POST | `/api/vault/setup` | 设置保险箱密码 | ❌ |
+| POST | `/api/vault/unlock` | 解锁保险箱（BCrypt 校验，Redis 记录解锁状态） | ❌ |
+| POST | `/api/vault/lock` | 锁定保险箱（清除 Redis 解锁状态） | ❌ |
+| GET | `/api/vault/status` | 查询保险箱状态（是否已设密码、是否解锁） | ❌ |
+| GET | `/api/vault/files/list` | 列出保险箱文件（需已解锁） | ✅ |
+| POST | `/api/vault/files/folder` | 在保险箱创建文件夹 | ❌ |
+| POST | `/api/vault/files/upload` | 上传文件到保险箱（自动标记 is_vaulted） | ❌ |
+| GET | `/api/vault/files/download/{id}` | 从保险箱下载文件 | ❌ |
+| PUT | `/api/vault/files/remove` | 从保险箱移出（清除 is_vaulted 标记） | ❌ |
+
+### 日历模块 — `netdisk-calendar`
+
+**接口前缀: `/api/calendar`**
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/calendar/today` | 获取当日农历/黄历/宜忌/分享吉日建议 |
+
+### 相册模块 — `netdisk-album`
+
+**接口前缀: `/api/albums`**
+
+| 方法 | 路径 | 说明 | 需分页 |
+|------|------|------|--------|
+| POST | `/api/albums` | 创建相册 | ❌ |
+| GET | `/api/albums` | 相册列表 | ✅ |
+| GET | `/api/albums/{id}` | 相册详情（含分页照片列表） | ✅ |
+| PUT | `/api/albums/{id}` | 更新相册（名称/描述/排序） | ❌ |
+| DELETE | `/api/albums/{id}` | 删除相册（级联删除关联记录） | ❌ |
+| POST | `/api/albums/{id}/items` | 向相册添加照片 | ❌ |
+| DELETE | `/api/albums/{id}/items` | 从相册移除照片 | ❌ |
+| PUT | `/api/albums/{id}/cover` | 设置相册封面 | ❌ |
 
 ### 用户模块 — `netdisk-user`
 
@@ -138,6 +181,11 @@ m78-netdisk (根 POM)
 - `GET /api/files/list?parentId=&page=&size=` — **FileController.listItems**
 - `GET /api/files/trash?page=&size=` — **FileController.listTrash**
 - `GET /api/shares/mine?page=&size=` — **ShareController.myShares**
+- `GET /api/shares/received?page=&size=` — **ShareController.receivedShares**
+- `GET /api/shares/access/{token}/items?parentId=&page=&size=` — **ShareController.listShareItems**
+- `GET /api/vault/files/list?parentId=&page=&size=` — **VaultController.listItems**
+- `GET /api/albums?page=&size=` — **AlbumController.listAlbums**
+- `GET /api/albums/{id}?page=&size=` — **AlbumController.getAlbumDetail**
 
 ---
 

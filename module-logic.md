@@ -8,14 +8,17 @@
 ## 模块依赖拓扑
 
 ```
-netdisk-bootstrap (启动入口, port 8080)
+netdisk-bootstrap (启动入口, port 8080, Swagger 聚合)
     ├── netdisk-common (公共基础设施)
     ├── netdisk-user   (用户认证)
-    ├── netdisk-file   (文件/文件夹 CRUD + 上传)
-    └── netdisk-share  (分享链接)
+    ├── netdisk-file   (文件/文件夹 CRUD + 上传 + 媒体进度追踪)
+    ├── netdisk-share  (分享链接 + 接收分享 + 分享内容浏览/下载/保存)
+    ├── netdisk-vault  (机密文件箱)
+    ├── netdisk-calendar (日历/农历)
+    └── netdisk-album  (相册管理)
 ```
 
-模块间依赖方向：`bootstrap → 其他全部`，`file/share/user → common`
+模块间依赖方向：`bootstrap → 其他全部`，`file/share/vault/calendar/album → common`
 
 ---
 
@@ -285,6 +288,8 @@ items 表：
   is_deleted    TINYINT(1) DEFAULT 0
   deleted_at    DATETIME
   version       INT DEFAULT 1
+  is_vaulted    TINYINT(1) DEFAULT 0   -- 1=机密文件箱内的文件
+  is_from_share TINYINT(1) DEFAULT 0   -- 1=通过分享保存得到的文件
   created_at    DATETIME
   updated_at    DATETIME
   UNIQUE(owner_id, parent_id, name)
@@ -312,6 +317,21 @@ upload_chunks 表：
   id, task_id, chunk_index, size, etag, storage_key, uploaded_at
   UNIQUE(task_id, chunk_index)
 ```
+
+#### MediaProgress — 媒体播放进度
+```
+media_progress 表：
+  id               BIGINT PK AUTO_INCREMENT
+  user_id          BIGINT NOT NULL FK→users
+  item_id          BIGINT NOT NULL FK→items
+  progress_seconds INT NOT NULL DEFAULT 0    -- 当前进度秒数
+  total_duration   INT NOT NULL DEFAULT 0    -- 媒体总时长秒数
+  finished         TINYINT(1) DEFAULT 0      -- 1=已看完
+  updated_at       DATETIME
+  UNIQUE(user_id, item_id)
+```
+- 使用 `INSERT ... ON DUPLICATE KEY UPDATE`（Upsert）写入
+- `FileService` 中对外提供 `getProgress()` 和 `saveProgress()`
 
 ### 3.2 接口清单
 
@@ -341,6 +361,8 @@ upload_chunks 表：
 | `GET` | `/api/files/download/{id}` | 下载文件 | 支持 HTTP Range 206，流式输出 | 含断点续传 |
 | `GET` | `/api/files/preview/{id}` | 预览文件 | 同下载但 Content-Disposition: inline | 图片/PDF/文本直接显示 |
 | `GET` | `/api/files/download/folder/{id}` | 下载文件夹 | 递归 ZIP 打包流式输出 | 保持目录结构 |
+| `GET` | `/api/files/progress/{itemId}` | 读取媒体播放进度 | path: itemId | 返回 MediaProgressVO |
+| `PUT` | `/api/files/progress/{itemId}` | 保存媒体播放进度 | body: `{progressSeconds, totalDuration, finished}` | Upsert 写入 |
 
 #### 直接上传（非分片）
 
@@ -439,6 +461,18 @@ shares 表：
   created_at      DATETIME
 ```
 
+```sql
+received_shares 表：
+  id             BIGINT PK AUTO_INCREMENT
+  user_id        BIGINT FK→users（接收者）
+  share_id       BIGINT FK→shares
+  item_id        BIGINT FK→items（访问的根文件/文件夹）
+  owner_id       BIGINT（分享者）
+  access_token   VARCHAR(32)
+  accessed_at    DATETIME
+  UNIQUE(user_id, share_id)
+```
+
 ### 4.2 接口清单
 
 | 方法 | 路径 | 功能 | 参数 | 说明 |
@@ -447,6 +481,10 @@ shares 表：
 | `POST` | `/api/shares/{id}/cancel` | 取消分享 | path: id | 设 is_canceled=true |
 | `GET` | `/api/shares/mine` | 我的分享列表 | `page, size` | 分页，未取消+未过期 |
 | `GET` | `/api/shares/access/{token}` | 访问分享 | path: token, query: `password?` | 返回 ShareVO（含文件信息） |
+| `GET` | `/api/shares/received` | 我接收的分享列表 | `page, size` | 分页，按 accessed_at DESC |
+| `GET` | `/api/shares/access/{token}/items` | 浏览分享文件夹内容 | path: token, query: `password?, parentId?, page, size` | 分页，返回 ItemVO |
+| `GET` | `/api/shares/access/{token}/download` | 从分享下载文件 | path: token, query: `password?, itemId` | 支持 HTTP Range 断点续传 |
+| `POST` | `/api/shares/access/{token}/save` | 保存分享文件到自己的存储 | path: token, query: `password?`, body: `itemIds[]` | 复制文件并标记 is_from_share |
 
 ### 4.3 核心业务逻辑
 
@@ -476,6 +514,40 @@ shares 表：
 → 每条补查 items 表获取文件信息
 ```
 
+**浏览分享文件夹内容（listShareItems）：**
+```
+1. 校验分享有效性（同 accessShare，但不增加 download_count）
+2. 查 items 表：WHERE parent_id = ? AND owner_id = 分享者.owner_id AND NOT is_deleted
+3. 分页返回 ItemVO（隐藏 storage_key，不暴露存储路径）
+```
+
+**从分享下载文件（getShareDownloadInfo）：**
+```
+1. 校验分享有效性 + 密码验证
+2. 校验 permission ∈ {download, edit}（view 权限不允许下载）
+3. 查 items 表校验 item 属于该分享
+4. 返回 FileDownloadVO{fileName, fileSize, mimeType, storageKey}
+5. Controller 获取 storageKey 后 stream 输出文件流
+```
+
+**保存分享文件到自己的存储（saveShareFiles）：**
+```
+1. 校验分享有效性 + 密码验证
+2. 遍历 itemIds，对每个文件：
+   a. 复制 storage_key 对应的物理文件到新路径（生成新的 UUID key）
+   b. 在 items 表创建新记录，owner_id = 当前用户, is_from_share = true
+3. 记录 received_shares（用户每访问一个分享只记录一次，UNIQUE 约束）
+4. 返回 List<ItemVO>（新创建的文件列表）
+```
+
+**我接收的分享列表（receivedShares）：**
+```
+→ selectReceivedShares(page, userId)
+→ JOIN shares + items 表
+→ 按 accessed_at DESC 排序
+→ 返回 ShareVO（含文件信息）
+```
+
 ### 4.4 ShareVO
 ```json
 {
@@ -496,6 +568,22 @@ shares 表：
   "mimeType": "image/jpeg"        // ← 来自 items 表
 }
 ```
+
+### 4.5 is_from_share 预览限制
+
+`items.is_from_share` 字段标记文件是通过分享保存得到的（非用户自己上传的）。
+
+**预览拦截逻辑：**
+```java
+// FileController.preview
+Item item = itemService.getById(id);
+if (item.getIsFromShare()) {
+    return R.forbidden("该文件来自分享，无法直接预览");
+}
+```
+- 原因：从分享保存的文件，其 storage_key 指向分享者的物理文件。直接预览会暴露分享者的存储路径。
+- 用户如需「预览」应下载到本地。
+- 该限制不影响下载和普通文件操作。
 
 ---
 
@@ -535,17 +623,235 @@ netdisk.storage.local-path: D:/M78netdisk/storage
 - Jackson 日期格式：`yyyy-MM-dd HH:mm:ss`，时区 `Asia/Shanghai`
 
 ### 5.3 API 文档（Swagger）
-- Knife4j + SpringDoc，分 4 组：用户模块、文件模块、分享模块、管理模块
+- Knife4j + SpringDoc，分 7 组：用户模块、文件模块、分享模块、管理模块、日历模块、机密文件箱模块、相册模块
 - 访问地址：`http://localhost:8080/swagger-ui/index.html`
+- 每组通过 `pathsToMatch("/api/{group}/**")` 路由
+
+| Swagger 分组 | 匹配路径 | 对应模块 |
+|-------------|---------|---------|
+| 用户模块 | `/api/users/**` | netdisk-user |
+| 文件模块 | `/api/files/**` | netdisk-file |
+| 分享模块 | `/api/shares/**` | netdisk-share |
+| 管理模块 | `/api/admin/**` | netdisk-common |
+| 日历模块 | `/api/calendar/**` | netdisk-calendar |
+| 机密文件箱模块 | `/api/vault/**` | netdisk-vault |
+| 相册模块 | `/api/albums/**` | netdisk-album |
 
 ---
 
-## 6. 数据库
+## 6. netdisk-vault — 机密文件箱模块
 
-### 6.1 建表脚本
+**包路径：** `com.m78.netdisk.vault`
+**基础路径：** `/api/vault`
+
+### 6.1 数据模型
+
+```sql
+user_vaults 表：
+  id             BIGINT PK AUTO_INCREMENT
+  user_id        BIGINT NOT NULL UNIQUE FK→users（每个用户一条）
+  password_hash  VARCHAR(255) NOT NULL（BCrypt 哈希）
+  created_at     DATETIME
+```
+
+### 6.2 接口清单
+
+| 方法 | 路径 | 功能 | 参数 | 说明 |
+|------|------|------|------|------|
+| `POST` | `/api/vault/setup` | 设置保险箱密码 | body: `{vaultPassword, confirmPassword}` | BCrypt 存储，密码 6-32 字符 |
+| `POST` | `/api/vault/unlock` | 解锁保险箱 | body: `{password}` | Redis key=`vault:unlock:{userId}` 有效期 1h |
+| `POST` | `/api/vault/lock` | 锁定保险箱 | 无 | 删除 Redis 解锁标记 |
+| `GET` | `/api/vault/status` | 查询保险箱状态 | 无 | 返回 `{hasPassword, isUnlocked}` |
+| `GET` | `/api/vault/files/list` | 列出保险箱文件 | `parentId?, page, size` | 仅返回 is_vaulted=true 的文件 |
+| `POST` | `/api/vault/files/folder` | 在保险箱创建文件夹 | body: `{parentId, name}` | 自动标记 is_vaulted=true |
+| `POST` | `/api/vault/files/upload` | 上传到保险箱 | `file`(MultipartFile), `parentId?` | 自动标记 is_vaulted=true |
+| `GET` | `/api/vault/files/download/{id}` | 从保险箱下载 | path: id | 需解锁 + 验证 is_vaulted |
+| `PUT` | `/api/vault/files/remove` | 从保险箱移出 | `itemId` | 清除 is_vaulted 标记（文件回到普通目录） |
+
+### 6.3 核心业务逻辑
+
+**设置密码（setup）：**
+```
+1. 校验密码长度 6-32
+2. 校验 confirmPassword 一致
+3. 校验未重复设置（已有记录则抛异常）
+4. BCrypt 哈希存入 user_vaults
+```
+
+**解锁流程（unlock）：**
+```
+1. 查 user_vaults 获取 password_hash
+2. BCrypt 校验密码
+3. 失败计数器 Redis key=vault:fail:{userId}，连续 5 次失败锁定 10 分钟
+4. 成功 → Redis set vault:unlock:{userId} = "1", EX 3600（1 小时自动过期）
+5. 清除失败计数器
+```
+
+**加锁流程（lock）：**
+```
+→ Redis delete vault:unlock:{userId}
+```
+
+**文件操作：（所有文件接口先校验解锁状态）**
+```
+→ 检查 Redis 中存在 vault:unlock:{userId}，不存在则抛 403
+→ 创建/上传时自动设置 items.is_vaulted = true
+→ 列表查询时增加 WHERE is_vaulted = true
+→ 移出时 UPDATE items SET is_vaulted = false
+```
+
+---
+
+## 7. netdisk-calendar — 日历模块
+
+**包路径：** `com.m78.netdisk.calendar`
+**基础路径：** `/api/calendar`
+
+### 7.1 功能概述
+
+纯工具模块，无数据库依赖。提供农历/黄历/宜忌查询，同时基于建除十二值推算当日「分享吉日」建议——提示用户当天是否适合分享、上传、下载或取消分享。
+
+### 7.2 接口清单
+
+| 方法 | 路径 | 功能 | 参数 | 说明 |
+|------|------|------|------|------|
+| `GET` | `/api/calendar/today` | 获取当日信息 | 无 | 返回 CalendarVO |
+
+### 7.3 CalendarVO 结构
+
+```json
+{
+  "date": "2026-05-29",
+  "lunar": {
+    "year": "丙午",
+    "month": "四月",
+    "day": "十三",
+    "zodiac": "马",
+    "heavenlyStem": "丙",
+    "earthlyBranch": "午",
+    "monthStem": "癸",
+    "monthBranch": "巳",
+    "dayStem": "辛",
+    "dayBranch": "未",
+    "jieQi": "小满",
+    "isLeapMonth": false,
+    "jianChu": "建"
+  },
+  "yi": ["嫁娶", "出行"],
+  "ji": ["动土", "破土"],
+  "shareAdvice": {
+    "favorableForShare": true,
+    "favorableForUpload": false,
+    "favorableForDownload": true,
+    "favorableForCancel": false
+  }
+}
+```
+
+### 7.4 核心实现
+
+- `LunarCalendarUtil` — 农历转换工具（内含 1900-2100 年农历数据表）
+- `LunarCalendarUtil.getShareAdvice()` — 根据建除十二值返回分享吉日建议
+- 纯计算，无数据库/Redis 依赖
+
+---
+
+## 8. netdisk-album — 相册模块
+
+**包路径：** `com.m78.netdisk.album`
+**基础路径：** `/api/albums`
+
+### 8.1 数据模型
+
+#### Album — 相册主表
+```
+albums 表：
+  id            BIGINT PK AUTO_INCREMENT
+  user_id       BIGINT NOT NULL FK→users
+  name          VARCHAR(128) NOT NULL
+  cover_item_id BIGINT（封面图片 item_id）
+  description   TEXT
+  sort_order    INT DEFAULT 0
+  created_at    DATETIME
+  updated_at    DATETIME
+```
+
+#### AlbumItem — 相册-文件关联
+```
+album_items 表：
+  id        BIGINT PK AUTO_INCREMENT
+  album_id  BIGINT NOT NULL FK→albums
+  item_id   BIGINT NOT NULL FK→items
+  added_at  DATETIME
+  UNIQUE(album_id, item_id)
+```
+
+### 8.2 接口清单
+
+| 方法 | 路径 | 功能 | 参数 | 说明 |
+|------|------|------|------|------|
+| `POST` | `/api/albums` | 创建相册 | body: `{name, description?, sortOrder?}` | 返回 AlbumVO |
+| `GET` | `/api/albums` | 相册列表 | `page, size` | 分页，按 sort_order ASC, created_at DESC |
+| `GET` | `/api/albums/{id}` | 相册详情 | path: id, query: `page, size` | 返回 AlbumVO + 分页照片列表 |
+| `PUT` | `/api/albums/{id}` | 更新相册 | path: id, body: `{name?, description?, sortOrder?}` | 返回 AlbumVO |
+| `DELETE` | `/api/albums/{id}` | 删除相册 | path: id | 级联删除 album_items |
+| `POST` | `/api/albums/{id}/items` | 添加照片 | path: id, body: `{itemIds}` | 校验 item 属于当前用户 |
+| `DELETE` | `/api/albums/{id}/items` | 移除照片 | path: id, query: `itemIds` | 仅删除关联，不删文件本身 |
+| `PUT` | `/api/albums/{id}/cover` | 设置封面 | path: id, query: `itemId` | 返回更新后的 AlbumVO |
+
+### 8.3 核心业务逻辑
+
+**创建相册：**
+```
+1. 校验 name 非空且不超过 128 字符
+2. 插入 albums 表（user_id = 当前用户）
+3. 返回 AlbumVO（含 id, name, createdAt）
+```
+
+**相册列表（分页）：**
+```
+→ selectPage(page, wrapper.eq("user_id", userId).orderByAsc("sort_order").orderByDesc("created_at"))
+→ 每条附带 itemCount（album_items 关联计数）+ coverThumbnail（封面缩略图 URL）
+```
+
+**相册详情：**
+```
+1. 查 albums 表获取相册基本信息
+2. 分页查 album_items WHERE album_id = ? ORDER BY added_at DESC
+3. JOIN items 表获取每张照片的 name / thumbnail_key / size / mimeType
+4. 返回 AlbumVO + records（List<AlbumItemVO>）
+```
+
+**添加照片到相册：**
+```
+1. 校验相册属于当前用户
+2. 遍历 itemIds，校验每个 item 属于当前用户且不是目录
+3. 批量 INSERT IGNORE INTO album_items（去重）
+```
+
+**从相册移除照片：**
+```
+1. 校验相册属于当前用户
+2. DELETE FROM album_items WHERE album_id = ? AND item_id IN (?)
+   （不删除 items 表中的实际文件）
+```
+
+**设置封面：**
+```
+1. 校验相册属于当前用户
+2. 校验 itemId 已在相册中（或属于当前用户）
+3. UPDATE albums SET cover_item_id = ? WHERE id = ?
+4. 返回更新后的 AlbumVO（含新的 coverItemId）
+```
+
+---
+
+## 9. 数据库
+
+### 9.1 建表脚本
 `D:\M78netdisk\database\init.sql`（MySQL 8.0 语法）
 
-### 6.2 表清单
+### 9.2 表清单
 
 | 表名 | 用途 | 关联模块 | 是否有代码操作 |
 |------|------|---------|--------------|
@@ -553,43 +859,48 @@ netdisk.storage.local-path: D:/M78netdisk/storage
 | `items` | 文件&文件夹（树形，软删除） | file | ✅ |
 | `item_versions` | 文件版本历史 | file | ✅ |
 | `shares` | 分享链接 | share | ✅ |
+| `received_shares` | 接收分享记录 | share | ✅ |
 | `upload_tasks` | 分片上传任务 | file | ✅ |
 | `upload_chunks` | 分片记录 | file | ✅ |
 | `operation_logs` | 审计日志 | common | ✅ |
 | `storage_nodes` | 存储后端节点 | common | ✅ |
+| `user_vaults` | 机密文件箱密码 | vault | ✅ |
+| `media_progress` | 媒体播放进度 | file | ✅ |
+| `albums` | 相册 | album | ✅ |
+| `album_items` | 相册-文件关联 | album | ✅ |
 
-### 6.3 分页统一规范
+### 9.3 分页统一规范
 - 入参：`page`(默认1) + `size`(默认20，最大100)
 - MP 分页插件：`PaginationInnerInterceptor(DbType.MYSQL)`
 - 响应：`IPage<T>` → `{records, total, size, current, pages}`
 
-### 6.4 冗余字段说明
+### 9.4 冗余字段说明
 - `items.path` — 物化路径（如 `/documents/photo.jpg`），写入时维护，读取时直接用，避免递归查询树形结构
 
 ---
 
-## 7. 常见维护场景
+## 10. 常见维护场景
 
-### 7.1 新增一个 API
+### 10.1 新增一个 API
 1. 确定 Controller 路径和 HTTP 方法
 2. Service 接口 + 实现
 3. DTO（请求体校验用 `@Valid`）+ VO（响应体）
 4. Mapper（继承 `BaseMapper` 或写 XML/注解）
 5. 如需分页，在 Service 中 `new Page<>(page, size)` 传入 Mapper
 
-### 7.2 增加新模块
+### 10.2 增加新模块
 1. 创建 Maven module（在根 pom.xml 添加 `<module>`）
 2. 在 bootstrap/pom.xml 添加依赖
 3. 遵循包命名规范：`com.m78.netdisk.{module}`
 4. Controller 路径前缀：`/api/{module}`
 
-### 7.3 修改数据库表
+### 10.3 修改数据库表
 1. 修改 `init.sql`
 2. 修改对应 POJO（`@TableName` + 字段）
 3. 修改 `schema-design.md`
 4. 检查所有引用的 Mapper XML/注解 SQL 是否需要调整
 
-### 7.4 切换存储后端
+### 10.4 切换存储后端
 `FileStorageService` 封装了所有文件读写操作。如需从本地磁盘切换至 S3/MinIO：
 1. 新增 `S3StorageService` 实现相同接口
 2. 通过配置切换 Bean（`@Profile` 或 `@ConditionalOnProperty`）

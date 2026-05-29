@@ -77,6 +77,7 @@ CREATE TABLE items (
     deleted_at    DATETIME,
     version       INT NOT NULL DEFAULT 1,            -- 当前版本号
     is_vaulted    TINYINT(1) NOT NULL DEFAULT 0,    -- 1=机密文件箱内的文件
+    is_from_share TINYINT(1) NOT NULL DEFAULT 0,    -- 1=从分享保存过来的文件，预览需确认
     created_at    DATETIME NOT NULL DEFAULT now(),
     updated_at    DATETIME NOT NULL DEFAULT now(),
 
@@ -260,6 +261,73 @@ CREATE TABLE user_vaults (
     created_at     DATETIME NOT NULL DEFAULT now()
 );
 ```
+
+---
+
+## 9. 媒体播放进度
+
+### media_progress — 视频/音频播放进度
+
+```sql
+CREATE TABLE media_progress (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id          BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    progress_seconds INT NOT NULL DEFAULT 0,         -- 当前播放进度，单位秒
+    total_duration   INT NOT NULL DEFAULT 0,         -- 媒体总时长，单位秒
+    finished         TINYINT(1) NOT NULL DEFAULT 0,  -- 1=已看完
+    updated_at       DATETIME NOT NULL DEFAULT now(),
+
+    UNIQUE (user_id, item_id)
+);
+CREATE INDEX idx_media_progress_user ON media_progress(user_id);
+CREATE INDEX idx_media_progress_item ON media_progress(item_id);
+```
+
+**设计要点：**
+- `UNIQUE (user_id, item_id)` — 每个用户对每个媒体文件只有一条进度记录，Upsert 语义
+- `progress_seconds` 前端定期（如每 30 秒）上报，后端覆盖写入
+- `finished = true` 时，前端可以显示「再看一次」按钮
+
+---
+
+## 10. 相册
+
+### albums — 相册主表
+
+```sql
+CREATE TABLE albums (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name          VARCHAR(128) NOT NULL,
+    cover_item_id BIGINT REFERENCES items(id) ON DELETE SET NULL,
+    description   TEXT,
+    sort_order    INT NOT NULL DEFAULT 0,
+    created_at    DATETIME NOT NULL DEFAULT now(),
+    updated_at    DATETIME NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_albums_user ON albums(user_id, sort_order);
+```
+
+### album_items — 相册-文件关联表
+
+```sql
+CREATE TABLE album_items (
+    id        BIGINT AUTO_INCREMENT PRIMARY KEY,
+    album_id  BIGINT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    item_id   BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    added_at  DATETIME NOT NULL DEFAULT now(),
+
+    UNIQUE (album_id, item_id)
+);
+CREATE INDEX idx_album_items_album ON album_items(album_id, added_at DESC);
+CREATE INDEX idx_album_items_item ON album_items(item_id);
+```
+
+**设计要点：**
+- `albums` 与 `items` 为 N:M 关系，通过 `album_items` 关联
+- `cover_item_id` 可设置为相册内任意一张图片的 item_id，`ON DELETE SET NULL` 防止封面图片被删除后相册无法访问
+- `sort_order` 控制相册在列表中的排序，越小越靠前
 
 ---
 
