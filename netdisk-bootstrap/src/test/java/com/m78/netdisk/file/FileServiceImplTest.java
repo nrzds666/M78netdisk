@@ -303,4 +303,55 @@ class FileServiceImplTest {
                 () -> fileService.saveProgress(OWNER_ID, ITEM_ID, dto));
         assertTrue(ex.getMessage().contains("不支持在线预览"));
     }
+
+    // ========== Recent files (home page) ==========
+
+    @Test
+    void listRecentItems_shouldReturnItems() {
+        List<Item> items = Arrays.asList(
+                new Item().setId(1L).setOwnerId(OWNER_ID).setName("photo.jpg").setIsDirectory(false).setSize(1000L).setMimeType("image/jpeg"),
+                new Item().setId(2L).setOwnerId(OWNER_ID).setName("doc.pdf").setIsDirectory(false).setSize(2000L).setMimeType("application/pdf")
+        );
+
+        when(itemMapper.selectRecentItems(OWNER_ID, 3)).thenReturn(items);
+
+        List<ItemVO> result = fileService.listRecentItems(OWNER_ID, 3);
+
+        assertEquals(2, result.size());
+        assertEquals("photo.jpg", result.get(0).getName());
+        verify(itemMapper).selectRecentItems(OWNER_ID, 3);
+    }
+
+    @Test
+    void listRecentItems_shouldReturnEmptyWhenNone() {
+        when(itemMapper.selectRecentItems(OWNER_ID, 3)).thenReturn(Collections.emptyList());
+
+        List<ItemVO> result = fileService.listRecentItems(OWNER_ID, 3);
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void listRecentSaves_shouldReturnItems() {
+        List<Item> items = Arrays.asList(
+                new Item().setId(3L).setOwnerId(OWNER_ID).setName("shared.pdf").setIsDirectory(false).setSize(5000L).setIsFromShare(true)
+        );
+
+        when(itemMapper.selectRecentSaves(OWNER_ID, 3)).thenReturn(items);
+
+        List<ItemVO> result = fileService.listRecentSaves(OWNER_ID, 3);
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).getIsFromShare());
+        verify(itemMapper).selectRecentSaves(OWNER_ID, 3);
+    }
+
+    @Test
+    void listRecentSaves_shouldReturnEmptyWhenNone() {
+        when(itemMapper.selectRecentSaves(OWNER_ID, 3)).thenReturn(Collections.emptyList());
+
+        List<ItemVO> result = fileService.listRecentSaves(OWNER_ID, 3);
+
+        assertTrue(result.isEmpty());
+    }
 }
