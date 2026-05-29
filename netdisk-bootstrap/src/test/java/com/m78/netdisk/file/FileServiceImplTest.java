@@ -5,6 +5,7 @@ import com.m78.netdisk.common.exception.BizException;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.dto.MoveItemsDTO;
 import com.m78.netdisk.file.domain.dto.RenameItemDTO;
+import com.m78.netdisk.file.domain.dto.SaveProgressDTO;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.domain.po.ItemVersion;
 import com.m78.netdisk.file.domain.po.UploadChunk;
@@ -13,6 +14,7 @@ import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.file.domain.vo.UploadTaskVO;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.file.mapper.ItemVersionMapper;
+import com.m78.netdisk.file.mapper.MediaProgressMapper;
 import com.m78.netdisk.file.mapper.UploadChunkMapper;
 import com.m78.netdisk.file.mapper.UploadTaskMapper;
 import com.m78.netdisk.file.service.impl.FileServiceImpl;
@@ -45,6 +47,7 @@ class FileServiceImplTest {
     @Mock private ItemVersionMapper itemVersionMapper;
     @Mock private UserMapper userMapper;
     @Mock private StorageService storageService;
+    @Mock private MediaProgressMapper mediaProgressMapper;
 
     @InjectMocks
     private FileServiceImpl fileService;
@@ -251,5 +254,53 @@ class FileServiceImplTest {
         } catch (Exception e) {
             fail("Reflection failed: " + e.getMessage());
         }
+    }
+
+    // ========== isFromShare preview blocking ==========
+
+    @Test
+    void getPreviewInfo_shouldBlockIsFromShare() {
+        Item item = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsFromShare(true);
+
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> fileService.getPreviewInfo(OWNER_ID, ITEM_ID));
+        assertTrue(ex.getMessage().contains("不支持在线预览"));
+    }
+
+    @Test
+    void getProgress_shouldBlockIsFromShare() {
+        Item item = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsFromShare(true);
+
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> fileService.getProgress(OWNER_ID, ITEM_ID));
+        assertTrue(ex.getMessage().contains("不支持在线预览"));
+    }
+
+    @Test
+    void saveProgress_shouldBlockIsFromShare() {
+        Item item = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsFromShare(true);
+
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+        SaveProgressDTO dto = new SaveProgressDTO();
+        dto.setProgressSeconds(30);
+        dto.setTotalDuration(120);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> fileService.saveProgress(OWNER_ID, ITEM_ID, dto));
+        assertTrue(ex.getMessage().contains("不支持在线预览"));
     }
 }

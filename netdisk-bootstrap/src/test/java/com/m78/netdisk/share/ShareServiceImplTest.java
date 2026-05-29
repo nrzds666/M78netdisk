@@ -1,8 +1,12 @@
 package com.m78.netdisk.share;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.common.exception.BizException;
+import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.common.utils.UserContext;
 import com.m78.netdisk.file.domain.po.Item;
+import com.m78.netdisk.file.domain.vo.FileDownloadVO;
+import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.share.domain.dto.CreateShareDTO;
 import com.m78.netdisk.share.domain.enums.ShareExpire;
@@ -41,6 +45,7 @@ class ShareServiceImplTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOps;
     @Mock private ReceivedShareMapper receivedShareMapper;
+    @Mock private StorageService storageService;
 
     @InjectMocks
     private ShareServiceImpl shareService;
@@ -614,5 +619,184 @@ class ShareServiceImplTest {
         // Should handle gracefully: vo is null, filtered by Page.convert
         assertEquals(1, vos.size());
         assertNull(vos.get(0));
+    }
+
+    // ==================== listShareItems ====================
+
+    @Test
+    void listShareItems_shouldListFolderContents() {
+        UserContext.setUserId(OTHER_USER_ID);
+
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN)
+                .setPermission("view");
+
+        Item sharedItem = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsDirectory(true);
+
+        Item child1 = new Item().setId(101L).setOwnerId(OWNER_ID).setParentId(ITEM_ID).setName("doc.pdf").setIsDirectory(false);
+        Item child2 = new Item().setId(102L).setOwnerId(OWNER_ID).setParentId(ITEM_ID).setName("photo.jpg").setIsDirectory(false);
+        Item child3 = new Item().setId(103L).setOwnerId(OWNER_ID).setParentId(ITEM_ID).setName("subfolder").setIsDirectory(true);
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Item> page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 20);
+        page.setRecords(java.util.List.of(child1, child2, child3));
+        page.setTotal(3);
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(sharedItem);
+        when(itemMapper.selectChildrenByOwnerId(any(), eq(OWNER_ID), eq(ITEM_ID))).thenReturn(page);
+
+        IPage<ItemVO> result = shareService.listShareItems(SHARE_TOKEN, null, null, 1, 20);
+
+        assertEquals(3, result.getRecords().size());
+        UserContext.remove();
+    }
+
+    @Test
+    void listShareItems_shouldReturnSingleFile() {
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN)
+                .setPermission("view");
+
+        Item sharedItem = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsDirectory(false)
+                .setName("single.pdf");
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(sharedItem);
+
+        IPage<ItemVO> result = shareService.listShareItems(SHARE_TOKEN, null, null, 1, 20);
+
+        assertEquals(1, result.getRecords().size());
+    }
+
+    @Test
+    void listShareItems_shouldThrowForInvalidShare() {
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(null);
+
+        assertThrows(BizException.class,
+                () -> shareService.listShareItems(SHARE_TOKEN, null, null, 1, 20));
+    }
+
+    // ==================== getShareDownloadInfo ====================
+
+    @Test
+    void getShareDownloadInfo_shouldReturnDownloadInfo() {
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN)
+                .setPermission("download");
+
+        Item folderItem = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsDirectory(true);
+
+        Item targetItem = new Item()
+                .setId(200L)
+                .setOwnerId(OWNER_ID)
+                .setParentId(ITEM_ID)
+                .setIsDirectory(false)
+                .setName("report.pdf")
+                .setStorageKey("uploads/report.pdf")
+                .setMimeType("application/pdf")
+                .setSize(50000L);
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+        when(itemMapper.selectById(200L)).thenReturn(targetItem);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(folderItem);
+        when(shareMapper.incrementDownloadCount(1L)).thenReturn(1);
+
+        FileDownloadVO result = shareService.getShareDownloadInfo(SHARE_TOKEN, null, 200L);
+
+        assertNotNull(result);
+        assertEquals("report.pdf", result.getFileName());
+        assertEquals("application/pdf", result.getMimeType());
+        assertEquals(Long.valueOf(50000), result.getFileSize());
+        assertEquals("uploads/report.pdf", result.getStorageKey());
+        verify(shareMapper).incrementDownloadCount(1L);
+    }
+
+    @Test
+    void getShareDownloadInfo_shouldRejectViewOnlyPermission() {
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN)
+                .setPermission("view");
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> shareService.getShareDownloadInfo(SHARE_TOKEN, null, 200L));
+        assertTrue(ex.getMessage().contains("不允许下载"));
+    }
+
+    // ==================== saveShareFiles ====================
+
+    @Test
+    void saveShareFiles_shouldSaveWithIsFromShare() {
+        UserContext.setUserId(OTHER_USER_ID);
+
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN)
+                .setPermission("download");
+
+        Item folderItem = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setIsDirectory(true);
+
+        Item fileItem = new Item()
+                .setId(200L)
+                .setOwnerId(OWNER_ID)
+                .setParentId(ITEM_ID)
+                .setName("photo.jpg")
+                .setMimeType("image/jpeg")
+                .setSize(50000L)
+                .setStorageKey("uploads/abc/photo.jpg")
+                .setIsDeleted(false)
+                .setIsDirectory(false);
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+        when(itemMapper.selectById(200L)).thenReturn(fileItem);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(folderItem);
+        when(storageService.getInputStream(anyString())).thenReturn(new java.io.ByteArrayInputStream("test".getBytes()));
+        doNothing().when(storageService).store(anyString(), any(java.io.InputStream.class));
+        when(itemMapper.insert(any(Item.class))).thenReturn(1);
+
+        java.util.List<ItemVO> result = shareService.saveShareFiles(SHARE_TOKEN, null, java.util.List.of(200L));
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).getIsFromShare());
+        UserContext.remove();
+    }
+
+    @Test
+    void saveShareFiles_shouldRejectEmptyList() {
+        BizException ex = assertThrows(BizException.class,
+                () -> shareService.saveShareFiles(SHARE_TOKEN, null, java.util.Collections.emptyList()));
+        assertTrue(ex.getMessage().contains("请选择要保存的文件"));
     }
 }

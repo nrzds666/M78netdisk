@@ -28,6 +28,11 @@
         </dependency>
         <dependency>
             <groupId>com.m78</groupId>
+            <artifactId>netdisk-album</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.m78</groupId>
             <artifactId>netdisk-share</artifactId>
             <version>1.0.0</version>
         </dependency>
