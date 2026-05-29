@@ -21,6 +21,7 @@ public class ItemVO {
     private String mimeType;
     private String etag;
     private String thumbnailKey;
+    private Boolean isFromShare;
     private String path;
     private Integer version;
     private String createdAt;

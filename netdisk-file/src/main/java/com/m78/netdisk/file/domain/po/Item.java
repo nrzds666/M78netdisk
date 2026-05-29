@@ -47,6 +47,8 @@ public class Item implements Serializable {
 
     private Boolean isVaulted;
 
+    private Boolean isFromShare;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

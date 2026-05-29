@@ -735,7 +735,7 @@ public class FileServiceImpl implements IFileService {
                 .id(item.getId()).ownerId(item.getOwnerId()).parentId(item.getParentId())
                 .name(item.getName()).isDirectory(item.getIsDirectory()).size(item.getSize())
                 .mimeType(item.getMimeType()).etag(item.getEtag()).thumbnailKey(item.getThumbnailKey())
-                .path(item.getPath()).version(item.getVersion())
+                .path(item.getPath()).version(item.getVersion()).isFromShare(item.getIsFromShare())
                 .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
                 .updatedAt(item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null)
                 .build();
