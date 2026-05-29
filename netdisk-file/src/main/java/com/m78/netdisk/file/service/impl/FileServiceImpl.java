@@ -664,6 +664,11 @@ public class FileServiceImpl implements IFileService {
         Item item = itemMapper.selectById(itemId);
         validateOwner(item, userId);
 
+        // Block progress tracking for files saved from shares
+        if (Boolean.TRUE.equals(item.getIsFromShare())) {
+            throw new BizException("分享保存的文件不支持在线预览");
+        }
+
         String mimeType = item.getMimeType();
         if (mimeType == null || !(mimeType.startsWith("video/") || mimeType.startsWith("audio/") || mimeType.startsWith("image/"))) {
             throw new BizException("不是媒体文件");
@@ -688,6 +693,11 @@ public class FileServiceImpl implements IFileService {
     public MediaProgressVO saveProgress(Long userId, Long itemId, SaveProgressDTO dto) {
         Item item = itemMapper.selectById(itemId);
         validateOwner(item, userId);
+
+        // Block progress tracking for files saved from shares
+        if (Boolean.TRUE.equals(item.getIsFromShare())) {
+            throw new BizException("分享保存的文件不支持在线预览");
+        }
 
         String mimeType = item.getMimeType();
         if (mimeType == null || !(mimeType.startsWith("video/") || mimeType.startsWith("audio/") || mimeType.startsWith("image/"))) {
