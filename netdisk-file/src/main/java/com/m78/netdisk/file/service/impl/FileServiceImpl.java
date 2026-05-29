@@ -556,6 +556,14 @@ public class FileServiceImpl implements IFileService {
 
     @Override
     public FileDownloadVO getPreviewInfo(Long ownerId, Long itemId) {
+        Item item = itemMapper.selectById(itemId);
+        if (item == null || !item.getOwnerId().equals(ownerId)) {
+            throw new BizException("文件不存在");
+        }
+        // Block preview for files saved from shares
+        if (Boolean.TRUE.equals(item.getIsFromShare())) {
+            throw new BizException("分享保存的文件不支持在线预览，请下载后查看");
+        }
         return getDownloadInfo(ownerId, itemId);
     }
 
