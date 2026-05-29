@@ -55,4 +55,20 @@ public class SwaggerConfig {
                 .pathsToMatch("/api/admin/**")
                 .build();
     }
+
+    @Bean
+    public GroupedOpenApi calendarApi() {
+        return GroupedOpenApi.builder()
+                .group("日历模块")
+                .pathsToMatch("/api/calendar/**")
+                .build();
+    }
+
+    @Bean
+    public GroupedOpenApi vaultApi() {
+        return GroupedOpenApi.builder()
+                .group("机密文件箱模块")
+                .pathsToMatch("/api/vault/**")
+                .build();
+    }
 }
