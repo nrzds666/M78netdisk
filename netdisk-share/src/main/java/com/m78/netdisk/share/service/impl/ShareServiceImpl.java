@@ -308,7 +308,7 @@ public class ShareServiceImpl implements IShareService {
             try (InputStream in = storageService.getInputStream(original.getStorageKey())) {
                 storageService.store(newStorageKey, in);
             } catch (Exception e) {
-                throw new BizException("保存文件失败: " + original.getName(), e);
+                throw new BizException("保存文件失败: " + original.getName());
             }
 
             // Create a new Item record for the current user
