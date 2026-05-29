@@ -1,38 +1,21 @@
 import request from './request'
 
-/**
- * User login
- * @param {string} username
- * @param {string} password
- * @returns {Promise}
- */
-export function login(username, password) {
-  return request.post('/user/login', { username, password })
+export function getCaptcha() {
+  return request.get('/users/captcha')
 }
 
-/**
- * User registration
- * @param {string} username
- * @param {string} password
- * @param {string} email
- * @returns {Promise}
- */
-export function register(username, password, email) {
-  return request.post('/user/register', { username, password, email })
+export function login(username, password, captchaKey, captchaCode) {
+  return request.post('/users/login', { username, password, captchaKey, captchaCode })
 }
 
-/**
- * Get current user info
- * @returns {Promise}
- */
+export function register(username, password, email, captchaKey, captchaCode) {
+  return request.post('/users/register', { username, password, email, captchaKey, captchaCode })
+}
+
 export function getUserInfo() {
-  return request.get('/user/info')
+  return request.get('/users')
 }
 
-/**
- * Refresh auth token
- * @returns {Promise}
- */
 export function refreshToken() {
-  return request.post('/user/refresh')
+  return request.post('/users/refresh')
 }

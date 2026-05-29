@@ -22,6 +22,12 @@
             <el-form-item label="密码" prop="password">
               <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password />
             </el-form-item>
+            <el-form-item v-if="captchaKey" label="验证码" prop="captchaCode">
+              <div class="captcha-row">
+                <el-input v-model="loginForm.captchaCode" placeholder="请输入验证码" :prefix-icon="Key" style="flex:1" />
+                <img v-if="captchaImage" :src="captchaImage" class="captcha-img" @click="loadCaptcha" title="点击刷新" />
+              </div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" class="submit-btn" :loading="loading" @click="handleLogin">
                 登 录
@@ -44,6 +50,12 @@
             <el-form-item label="确认密码" prop="confirmPassword">
               <el-input v-model="registerForm.confirmPassword" type="password" placeholder="再次输入密码" :prefix-icon="Lock" show-password />
             </el-form-item>
+            <el-form-item v-if="captchaKey" label="验证码" prop="captchaCode">
+              <div class="captcha-row">
+                <el-input v-model="registerForm.captchaCode" placeholder="请输入验证码" :prefix-icon="Key" style="flex:1" />
+                <img v-if="captchaImage" :src="captchaImage" class="captcha-img" @click="loadCaptcha" title="点击刷新" />
+              </div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" class="submit-btn" :loading="loading" @click="handleRegister">
                 注 册
@@ -57,27 +69,31 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
-import { User, Lock, Message } from '@element-plus/icons-vue'
+import { User, Lock, Message, Key } from '@element-plus/icons-vue'
+import { getCaptcha } from '@/api/user'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const activeTab = ref('login')
 const loading = ref(false)
+const captchaKey = ref('')
+const captchaImage = ref('')
 
 const loginFormRef = ref(null)
 const registerFormRef = ref(null)
 
-const loginForm = reactive({ username: '', password: '' })
-const registerForm = reactive({ username: '', email: '', password: '', confirmPassword: '' })
+const loginForm = reactive({ username: '', password: '', captchaCode: '' })
+const registerForm = reactive({ username: '', email: '', password: '', confirmPassword: '', captchaCode: '' })
 
 const loginRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  captchaCode: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
 }
 
 const validateConfirm = (rule, value, callback) => {
@@ -97,7 +113,19 @@ const registerRules = {
   confirmPassword: [
     { required: true, message: '请确认密码', trigger: 'blur' },
     { validator: validateConfirm, trigger: 'blur' }
-  ]
+  ],
+  captchaCode: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
+}
+
+async function loadCaptcha() {
+  try {
+    const res = await getCaptcha()
+    captchaKey.value = res.data.data.key
+    captchaImage.value = res.data.data.imageBase64
+  } catch {
+    captchaKey.value = ''
+    captchaImage.value = ''
+  }
 }
 
 async function handleLogin() {
@@ -105,11 +133,14 @@ async function handleLogin() {
   if (!valid) return
   loading.value = true
   try {
-    await userStore.login(loginForm.username, loginForm.password)
+    await userStore.login(loginForm.username, loginForm.password, captchaKey.value, loginForm.captchaCode)
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
-    ElMessage.error(e.response?.data?.msg || '登录失败')
+    const msg = e.response?.data?.msg || e.message || '登录失败'
+    ElMessage.error(msg)
+    loadCaptcha()
+    loginForm.captchaCode = ''
   } finally {
     loading.value = false
   }
@@ -120,15 +151,20 @@ async function handleRegister() {
   if (!valid) return
   loading.value = true
   try {
-    await userStore.register(registerForm.username, registerForm.password, registerForm.email || undefined)
+    await userStore.register(registerForm.username, registerForm.password, registerForm.email || undefined, captchaKey.value, registerForm.captchaCode)
     ElMessage.success('注册成功，已自动登录')
     router.push('/')
   } catch (e) {
-    ElMessage.error(e.response?.data?.msg || '注册失败')
+    const msg = e.response?.data?.msg || e.message || '注册失败'
+    ElMessage.error(msg)
+    loadCaptcha()
+    registerForm.captchaCode = ''
   } finally {
     loading.value = false
   }
 }
+
+onMounted(loadCaptcha)
 </script>
 
 <style scoped>
@@ -171,6 +207,20 @@ async function handleRegister() {
 
 .login-tabs {
   margin-bottom: 8px;
+}
+
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.captcha-img {
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .submit-btn {
