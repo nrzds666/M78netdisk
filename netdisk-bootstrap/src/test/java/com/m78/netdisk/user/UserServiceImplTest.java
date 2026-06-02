@@ -23,6 +23,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -84,9 +86,13 @@ class UserServiceImplTest {
             dto.setEmail("new@test.com");
 
             when(userMapper.selectCount(any())).thenReturn(0L);
-            when(userMapper.insert(any(User.class))).thenReturn(1);
-            when(jwtTool.createAccessToken(anyLong())).thenReturn("access-token");
-            when(jwtTool.createRefreshToken(anyLong())).thenReturn("refresh-token");
+            doAnswer(inv -> {
+                User u = inv.getArgument(0);
+                u.setId(USER_ID);
+                return 1;
+            }).when(userMapper).insert(any(User.class));
+            when(jwtTool.createAccessToken(any())).thenReturn("access-token");
+            when(jwtTool.createRefreshToken(any())).thenReturn("refresh-token");
 
             userService.register(dto);
 
@@ -110,9 +116,13 @@ class UserServiceImplTest {
             dto.setPassword("password123");
 
             when(userMapper.selectCount(any())).thenReturn(0L);
-            when(userMapper.insert(any(User.class))).thenReturn(1);
-            when(jwtTool.createAccessToken(anyLong())).thenReturn("access-token");
-            when(jwtTool.createRefreshToken(anyLong())).thenReturn("refresh-token");
+            doAnswer(inv -> {
+                User u = inv.getArgument(0);
+                u.setId(USER_ID);
+                return 1;
+            }).when(userMapper).insert(any(User.class));
+            when(jwtTool.createAccessToken(any())).thenReturn("access-token");
+            when(jwtTool.createRefreshToken(any())).thenReturn("refresh-token");
 
             userService.register(dto);
 
@@ -132,7 +142,6 @@ class UserServiceImplTest {
             dto.setPassword("password123");
 
             when(userMapper.selectCount(any())).thenReturn(0L);
-            when(userMapper.insert(any(User.class))).thenReturn(1);
             when(jwtTool.createAccessToken(USER_ID)).thenReturn("access-token");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("refresh-token");
 
@@ -425,7 +434,8 @@ class UserServiceImplTest {
                     .setAvatarUrl("http://avatar.url")
                     .setStatus(1)
                     .setQuotaBytes(10737418240L)
-                    .setUsedBytes(500L);
+                    .setUsedBytes(500L)
+                    .setCreatedAt(LocalDateTime.now());
 
             when(userMapper.selectById(USER_ID)).thenReturn(user);
 
@@ -510,7 +520,8 @@ class UserServiceImplTest {
             User user = new User()
                     .setId(USER_ID)
                     .setUsername("testuser")
-                    .setPasswordHash(encoder.encode("secret"));
+                    .setPasswordHash(encoder.encode("secret"))
+                    .setCreatedAt(LocalDateTime.now());
 
             when(userMapper.selectById(USER_ID)).thenReturn(user);
 

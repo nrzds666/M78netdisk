@@ -84,9 +84,6 @@ class FileSecurityTest {
         @Test
         @DisplayName("RED: initUpload 应拒绝含 '/' 的文件名")
         void initUpload_shouldRejectFilenameWithSlash() {
-            User user = new User().setId(OWNER_ID).setUsedBytes(0L).setQuotaBytes(10_000_000L);
-            when(userMapper.selectById(OWNER_ID)).thenReturn(user);
-
             InitUploadDTO dto = makeDto("folder/file.txt");
             assertThrows(BizException.class, () -> fileService.initUpload(OWNER_ID, dto));
         }
@@ -94,9 +91,6 @@ class FileSecurityTest {
         @Test
         @DisplayName("RED: initUpload 应拒绝含 '\\\\' 的文件名")
         void initUpload_shouldRejectFilenameWithBackslash() {
-            User user = new User().setId(OWNER_ID).setUsedBytes(0L).setQuotaBytes(10_000_000L);
-            when(userMapper.selectById(OWNER_ID)).thenReturn(user);
-
             InitUploadDTO dto = makeDto("folder\\file.txt");
             assertThrows(BizException.class, () -> fileService.initUpload(OWNER_ID, dto));
         }
@@ -104,19 +98,13 @@ class FileSecurityTest {
         @Test
         @DisplayName("RED: initUpload 应拒绝含 '..' 的文件名 (路径穿越)")
         void initUpload_shouldRejectFilenameWithPathTraversal() {
-            User user = new User().setId(OWNER_ID).setUsedBytes(0L).setQuotaBytes(10_000_000L);
-            when(userMapper.selectById(OWNER_ID)).thenReturn(user);
-
             InitUploadDTO dto = makeDto("../../../etc/passwd");
             assertThrows(BizException.class, () -> fileService.initUpload(OWNER_ID, dto));
         }
 
         @Test
-        @DisplayName("RED: initUpload 应拒绝含 '\\0' 的文件名")
+        @DisplayName("RED: initUpload 应拒绝含 '\\\\0' 的文件名")
         void initUpload_shouldRejectFilenameWithNullByte() {
-            User user = new User().setId(OWNER_ID).setUsedBytes(0L).setQuotaBytes(10_000_000L);
-            when(userMapper.selectById(OWNER_ID)).thenReturn(user);
-
             InitUploadDTO dto = makeDto("file\0.txt");
             assertThrows(BizException.class, () -> fileService.initUpload(OWNER_ID, dto));
         }
@@ -124,9 +112,6 @@ class FileSecurityTest {
         @Test
         @DisplayName("RED: initUpload 应拒绝文件名为空")
         void initUpload_shouldRejectBlankFilename() {
-            User user = new User().setId(OWNER_ID).setUsedBytes(0L).setQuotaBytes(10_000_000L);
-            when(userMapper.selectById(OWNER_ID)).thenReturn(user);
-
             InitUploadDTO dto = makeDto("   ");
             assertThrows(BizException.class, () -> fileService.initUpload(OWNER_ID, dto));
         }
@@ -458,8 +443,16 @@ class FileSecurityTest {
         @DisplayName("createFile 应在配额不足时回滚")
         void createFile_shouldRollbackWhenQuotaExceeded() {
             when(itemMapper.countByName(anyLong(), any(), anyString())).thenReturn(0);
-            when(itemMapper.insert(any(Item.class))).thenReturn(1);
-            when(itemVersionMapper.insert(any(ItemVersion.class))).thenReturn(1);
+            doAnswer(inv -> {
+                Item item = inv.getArgument(0);
+                item.setId(12345L);
+                return 1;
+            }).when(itemMapper).insert(any(Item.class));
+            doAnswer(inv -> {
+                ItemVersion v = inv.getArgument(0);
+                v.setId(54321L);
+                return 1;
+            }).when(itemVersionMapper).insert(any(ItemVersion.class));
             // tryAddUsedBytes returns 0 = quota exceeded
             when(userMapper.tryAddUsedBytes(OWNER_ID, 10000L)).thenReturn(0);
 

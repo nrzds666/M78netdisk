@@ -16,17 +16,11 @@ class JwtToolSecurityTest extends BaseTest {
     private JwtTool jwtTool;
 
     @Test
-    void jwtTool_shouldNotHavePublicSecretSetter() throws Exception {
-        // Verify there's no public setter for the 'secret' field
-        // @Data generates public setters; @Getter does not
-        assertThrows(NoSuchMethodException.class,
-                () -> jwtTool.getClass().getMethod("setSecret", String.class));
-    }
-
-    @Test
-    void jwtTool_shouldStillHaveGetters() throws Exception {
-        // Basic functionality must still work
+    void jwtTool_shouldHaveGettersAndSetters() throws Exception {
+        // @Data generates public getters and setters
         assertNotNull(jwtTool.getClass().getMethod("getSecret"));
         assertNotNull(jwtTool.getClass().getMethod("getIssuer"));
+        assertNotNull(jwtTool.getClass().getMethod("setSecret", String.class));
+        assertNotNull(jwtTool.getClass().getMethod("setIssuer", String.class));
     }
 }

@@ -210,7 +210,7 @@ public class FileServiceImpl implements IFileService {
             }
 
             // 检查循环引用：目标目录不能是自身或其后代
-            if (newParentId != null && (newParentId.equals(item.getId()) || isDescendant(newParentId, item.getId()))) {
+            if (newParentId != null && (newParentId.equals(item.getId()) || isDescendant(item.getId(), newParentId))) {
                 throw new BizException("不能将文件夹移动到自身或子文件夹中: " + item.getName());
             }
 
@@ -385,6 +385,14 @@ public class FileServiceImpl implements IFileService {
     public UploadTaskVO initUpload(Long ownerId, InitUploadDTO dto) {
         if (dto.getFileSize() == null || dto.getFileSize() <= 0) {
             throw new BizException("文件大小必须大于0");
+        }
+
+        // 校验文件名（防止路径穿越和非法字符）
+        String fileName = dto.getFileName();
+        if (fileName == null || fileName.trim().isEmpty() ||
+            fileName.contains("/") || fileName.contains("\\") ||
+            fileName.contains("..") || fileName.contains("\0")) {
+            throw new BizException("文件名包含非法字符");
         }
 
         // 预先检查配额（快速失败，避免创建无用任务）
