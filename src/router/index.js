@@ -1,10 +1,28 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getToken } from '@/utils/auth'
 
 const routes = [
   {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/login/LoginView.vue')
+  },
+  // Share access — no auth required, standalone layout
+  {
+    path: '/share/:token',
+    name: 'ShareAccess',
+    component: () => import('@/views/share/ShareAccessView.vue')
+  },
+  {
+    path: '/share/:token/folder/:folderId',
+    name: 'ShareAccessFolder',
+    component: () => import('@/views/share/ShareAccessView.vue')
+  },
+  // Album share — no auth required, standalone layout
+  {
+    path: '/album-share/:token',
+    name: 'AlbumShareAccess',
+    component: () => import('@/views/album/AlbumShareAccessView.vue')
   },
   {
     path: '/',
@@ -40,6 +58,21 @@ const routes = [
         path: 'shares',
         name: 'MyShares',
         component: () => import('@/views/share/MySharesView.vue')
+      },
+      {
+        path: 'albums',
+        name: 'Albums',
+        component: () => import('@/views/album/AlbumView.vue')
+      },
+      {
+        path: 'albums/:id',
+        name: 'AlbumDetail',
+        component: () => import('@/views/album/AlbumDetailView.vue')
+      },
+      {
+        path: 'vault',
+        name: 'Vault',
+        component: () => import('@/views/vault/VaultView.vue')
       }
     ]
   }
@@ -51,8 +84,12 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  if (to.name !== 'Login' && !token) {
+  // Allow public share access without auth
+  if (to.name === 'ShareAccess' || to.name === 'ShareAccessFolder' || to.name === 'AlbumShareAccess') {
+    next()
+    return
+  }
+  if (to.name !== 'Login' && !getToken()) {
     next({ name: 'Login' })
   } else {
     next()

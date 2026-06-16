@@ -107,6 +107,12 @@ const currentDate = computed(() => {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 星期${weekDays[d.getDay()]}`
 })
 
+/** 获取 YYYY-MM-DD 格式的今天日期 */
+function todayKey() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 async function loadData() {
   try {
     const [filesRes, savesRes] = await Promise.all([
@@ -120,12 +126,33 @@ async function loadData() {
   }
 }
 
+function loadFortune() {
+  const saved = localStorage.getItem('m78_fortune')
+  if (saved) {
+    try {
+      const { date, data } = JSON.parse(saved)
+      if (date === todayKey()) {
+        calendarData.value = data
+        showFortune.value = false
+        return
+      }
+    } catch {
+      // ignore corrupt data
+    }
+  }
+}
+
 async function checkFortune() {
   loading.value = true
   try {
     const res = await getToday()
     calendarData.value = res.data || {}
     showFortune.value = false
+    // 保存到 localStorage，当天不再显示按钮
+    localStorage.setItem('m78_fortune', JSON.stringify({
+      date: todayKey(),
+      data: calendarData.value
+    }))
   } catch (e) {
     calendarData.value = {
       yi: ['学习', '交流'],
@@ -151,7 +178,10 @@ function formatTime(t) {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  loadFortune()
+})
 </script>
 
 <style scoped>

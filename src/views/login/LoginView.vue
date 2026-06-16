@@ -120,8 +120,8 @@ const registerRules = {
 async function loadCaptcha() {
   try {
     const res = await getCaptcha()
-    captchaKey.value = res.data.data.key
-    captchaImage.value = res.data.data.imageBase64
+    captchaKey.value = res.data.key
+    captchaImage.value = res.data.imageBase64
   } catch {
     captchaKey.value = ''
     captchaImage.value = ''
@@ -173,15 +173,18 @@ onMounted(loadCaptcha)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
 }
 
 .login-card {
   width: 420px;
   padding: 40px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 .login-header {
