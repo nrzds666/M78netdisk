@@ -19,7 +19,18 @@ public interface ItemMapper extends BaseMapper<Item> {
     IPage<Item> selectChildren(Page<Item> page, @Param("ownerId") Long ownerId,
                                @Param("parentId") Long parentId);
 
-    @Select("SELECT COUNT(*) FROM items WHERE owner_id = #{ownerId} AND parent_id = #{parentId} " +
+    IPage<Item> selectFilteredItems(Page<Item> page,
+                                    @Param("ownerId") Long ownerId,
+                                    @Param("parentId") Long parentId,
+                                    @Param("query") String query,
+                                    @Param("mimePrefix") String mimePrefix,
+                                    @Param("mimeTypes") java.util.List<String> mimeTypes,
+                                    @Param("excludePrefix") String excludePrefix,
+                                    @Param("dateFrom") String dateFrom,
+                                    @Param("dateTo") String dateTo);
+
+    @Select("SELECT COUNT(*) FROM items WHERE owner_id = #{ownerId} " +
+            "AND (parent_id = #{parentId} OR (parent_id IS NULL AND #{parentId} IS NULL)) " +
             "AND name = #{name} AND NOT is_deleted AND NOT is_vaulted")
     int countByName(@Param("ownerId") Long ownerId, @Param("parentId") Long parentId,
                     @Param("name") String name);

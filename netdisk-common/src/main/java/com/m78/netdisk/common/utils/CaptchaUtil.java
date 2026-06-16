@@ -1,6 +1,5 @@
 package com.m78.netdisk.common.utils;
 
-import com.wf.captcha.ArithmeticCaptcha;
 import com.wf.captcha.SpecCaptcha;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -28,14 +27,14 @@ public class CaptchaUtil {
      * 生成算术验证码，返回图片 base64 和 key
      */
     public CaptchaResult generateArithmetic() {
-        ArithmeticCaptcha captcha = new ArithmeticCaptcha(130, 48);
-        captcha.setLen(2); // 2个数字运算
-        String code = captcha.text();    // 运算结果，如 "5"
+        JavaArithmeticCaptcha captcha = new JavaArithmeticCaptcha(130, 48);
+        String imageBase64 = captcha.toBase64(); // 生成表达式并绘制图片
+        String code = captcha.text();             // 运算结果，如 "5"
         String key = nextKey();
         redisTemplate.opsForValue().set(
                 CAPTCHA_PREFIX + key, code.toLowerCase(),
                 CAPTCHA_EXPIRE_SEC, TimeUnit.SECONDS);
-        return new CaptchaResult(key, captcha.toBase64());
+        return new CaptchaResult(key, imageBase64);
     }
 
     /**

@@ -36,6 +36,39 @@
         ORDER BY is_directory DESC, sort_order ASC, name ASC
     </select>
 
+    <select id="selectFilteredItems" resultMap="BaseResultMap">
+        SELECT * FROM items
+        WHERE owner_id = #{ownerId} AND NOT is_deleted AND NOT is_vaulted
+        <if test="parentId != null">
+            AND parent_id = #{parentId}
+        </if>
+        <if test="parentId == null">
+            AND parent_id IS NULL
+        </if>
+        <if test="query != null and query != ''">
+            AND name LIKE CONCAT('%', #{query}, '%')
+        </if>
+        <if test="mimePrefix != null and mimePrefix != ''">
+            AND mime_type LIKE CONCAT(#{mimePrefix}, '%')
+        </if>
+        <if test="mimeTypes != null and mimeTypes.size() > 0">
+            AND mime_type IN
+            <foreach item="mt" collection="mimeTypes" open="(" separator="," close=")">
+                #{mt}
+            </foreach>
+        </if>
+        <if test="excludePrefix != null and excludePrefix != ''">
+            AND (mime_type IS NULL OR mime_type NOT LIKE CONCAT(#{excludePrefix}, '%'))
+        </if>
+        <if test="dateFrom != null">
+            AND updated_at >= #{dateFrom}
+        </if>
+        <if test="dateTo != null">
+            AND updated_at &lt;= #{dateTo}
+        </if>
+        ORDER BY is_directory DESC, sort_order ASC, name ASC
+    </select>
+
     <select id="selectTrash" resultMap="BaseResultMap">
         SELECT * FROM items
         WHERE owner_id = #{ownerId} AND is_deleted

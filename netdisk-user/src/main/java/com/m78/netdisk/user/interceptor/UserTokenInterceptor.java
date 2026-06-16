@@ -23,6 +23,10 @@ public class UserTokenInterceptor implements HandlerInterceptor {
                              HttpServletResponse response,
                              Object handler) {
         String token = request.getHeader("Authorization");
+        // 也支持 URL 参数传递 token（用于 window.open 下载/预览场景）
+        if (StrUtil.isBlank(token)) {
+            token = request.getParameter("token");
+        }
         if (StrUtil.isNotBlank(token)) {
             if (token.startsWith("Bearer ")) {
                 token = token.substring(7);

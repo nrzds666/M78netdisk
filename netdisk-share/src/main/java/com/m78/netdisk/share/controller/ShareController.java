@@ -3,6 +3,7 @@ package com.m78.netdisk.share.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.storage.StorageService;
+import com.m78.netdisk.common.utils.JwtTool;
 import com.m78.netdisk.common.utils.UserContext;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
@@ -31,6 +32,7 @@ public class ShareController {
 
     private final IShareService shareService;
     private final StorageService storageService;
+    private final JwtTool jwtTool;
 
     @PostMapping
     public R<ShareVO> createShare(@Valid @RequestBody CreateShareDTO dto) {
@@ -93,7 +95,18 @@ public class ShareController {
     public R<List<ItemVO>> saveShareFiles(
             @PathVariable String token,
             @RequestParam(required = false) String password,
-            @RequestBody List<Long> itemIds) {
+            @RequestBody List<Long> itemIds,
+            @RequestHeader("Authorization") String authHeader) {
+        // Manually extract userId since /api/shares/access/** is excluded from interceptor
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String jwt = authHeader.substring(7);
+            try {
+                Long userId = jwtTool.parseToken(jwt);
+                UserContext.setUserId(userId);
+            } catch (Exception e) {
+                return R.unauthorized("登录已过期，请重新登录");
+            }
+        }
         return R.ok(shareService.saveShareFiles(token, password, itemIds));
     }
 

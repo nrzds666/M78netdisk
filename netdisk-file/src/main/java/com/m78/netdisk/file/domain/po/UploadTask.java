@@ -37,6 +37,12 @@ public class UploadTask implements Serializable {
 
     private String storagePrefix;
 
+    /** OSS MultipartUpload 的 uploadId */
+    private String uploadId;
+
+    /** 合并后的 storageKey（OSS 用 CompleteMultipartUpload 写入） */
+    private String mergedKey;
+
     private LocalDateTime expiresAt;
 
     @TableField(fill = FieldFill.INSERT)

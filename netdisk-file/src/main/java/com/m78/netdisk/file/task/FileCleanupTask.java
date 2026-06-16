@@ -44,13 +44,24 @@ public class FileCleanupTask {
     public void cleanExpiredUploadTasks() {
         List<UploadTask> expiredTasks = uploadTaskMapper.selectList(
                 new LambdaQueryWrapper<UploadTask>()
-                        .in(UploadTask::getStatus, "pending", "uploading", "canceled")
+                        .in(UploadTask::getStatus, "pending", "uploading", "canceled", "paused")
                         .lt(UploadTask::getExpiresAt, LocalDateTime.now())
                         .last("LIMIT 1000"));
 
         if (expiredTasks.isEmpty()) return;
 
         for (UploadTask task : expiredTasks) {
+            // 先标记为 expired，再清理存储（防止并发合并读到半删状态）
+            task.setStatus("expired");
+            uploadTaskMapper.updateById(task);
+
+            // OSS multipart 需 abort
+            if (task.getUploadId() != null) {
+                try {
+                    storageService.abortMultipartUpload(task.getMergedKey(), task.getUploadId());
+                } catch (Exception ignored) {}
+            }
+
             // 清理分片存储
             List<UploadChunk> chunks = uploadChunkMapper.selectList(
                     new LambdaQueryWrapper<UploadChunk>().eq(UploadChunk::getTaskId, task.getId()));
@@ -61,9 +72,6 @@ public class FileCleanupTask {
             }
             uploadChunkMapper.delete(
                     new LambdaQueryWrapper<UploadChunk>().eq(UploadChunk::getTaskId, task.getId()));
-            // 标记任务为过期
-            task.setStatus("expired");
-            uploadTaskMapper.updateById(task);
             log.info("上传任务已过期: taskId={}, fileName={}", task.getId(), task.getFileName());
         }
     }

@@ -10,6 +10,7 @@ import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.file.domain.vo.MediaProgressVO;
 import com.m78.netdisk.file.domain.vo.UploadTaskVO;
 import com.m78.netdisk.file.domain.vo.ZipResult;
+import com.m78.netdisk.file.service.DocumentConversionService;
 import com.m78.netdisk.file.service.IFileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,13 +37,59 @@ public class FileController {
 
     private final IFileService fileService;
     private final StorageService storageService;
+    private final DocumentConversionService documentConversionService;
 
     @GetMapping("/list")
     public R<IPage<ItemVO>> listItems(
             @RequestParam(required = false) Long parentId,
             @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer size) {
-        return R.ok(fileService.listItems(UserContext.getUserId(), parentId, page, size));
+            @RequestParam(defaultValue = "20") Integer size,
+            @RequestParam(required = false) String query,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo) {
+        // 转换 type 筛选为 mime 条件
+        String mimePrefix = null;
+        List<String> mimeTypes = null;
+        String excludePrefix = null;
+        if (type != null && !type.isEmpty()) {
+            switch (type) {
+                case "image": mimePrefix = "image/"; break;
+                case "video": mimePrefix = "video/"; break;
+                case "audio": mimePrefix = "audio/"; break;
+                case "document":
+                    mimeTypes = java.util.Arrays.asList(
+                            "application/pdf",
+                            "application/msword",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-powerpoint",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            "text/plain", "text/html", "text/css", "text/javascript",
+                            "application/json", "application/xml");
+                    break;
+                case "archive":
+                    mimeTypes = java.util.Arrays.asList(
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "application/x-rar-compressed",
+                            "application/x-7z-compressed",
+                            "application/gzip",
+                            "application/x-tar",
+                            "application/x-bzip2",
+                            "application/x-bzip");
+                    break;
+                case "other":
+                    excludePrefix = "image/";  // exclude known types
+                    // 排除所有已知类型：在 SQL 中通过多个 excludePrefix 处理
+                    // 使用空 mimeTypes 和非空 excludePrefix 实现"其他"
+                    break;
+                default: break;
+            }
+        }
+        return R.ok(fileService.listItems(UserContext.getUserId(), parentId, page, size,
+                query, mimePrefix, mimeTypes, excludePrefix, dateFrom, dateTo));
     }
 
     @PostMapping("/folder")
@@ -111,9 +158,26 @@ public class FileController {
         return R.ok();
     }
 
+    /**
+     * 上传单个分片（分片上传使用）
+     */
+    @PostMapping("/upload/{taskId}/chunk/{index}")
+    public R<Void> uploadChunk(@PathVariable Long taskId,
+                                @PathVariable Integer index,
+                                @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        fileService.uploadChunk(UserContext.getUserId(), taskId, index, file);
+        return R.ok();
+    }
+
     @PostMapping("/upload/complete")
     public R<UploadTaskVO> completeUpload(@RequestParam Long taskId) {
         return R.ok(fileService.completeUpload(UserContext.getUserId(), taskId));
+    }
+
+    @PostMapping("/upload/{taskId}/pause")
+    public R<Void> pauseUpload(@PathVariable Long taskId) {
+        fileService.pauseUpload(UserContext.getUserId(), taskId);
+        return R.ok();
     }
 
     @PostMapping("/upload/cancel")
@@ -125,6 +189,31 @@ public class FileController {
     @GetMapping("/upload/status")
     public R<UploadTaskVO> getUploadStatus(@RequestParam Long taskId) {
         return R.ok(fileService.getUploadStatus(UserContext.getUserId(), taskId));
+    }
+
+    /**
+     * 获取未完成的上传任务列表（用于断点续传）
+     */
+    @GetMapping("/upload/tasks")
+    public R<List<UploadTaskVO>> listUnfinishedTasks() {
+        return R.ok(fileService.listUnfinishedTasks(UserContext.getUserId()));
+    }
+
+    /**
+     * 获取已完成的分片索引列表（用于断点续传跳过已上传分片）
+     */
+    @GetMapping("/upload/tasks/{taskId}/chunks")
+    public R<List<Integer>> getCompletedChunks(@PathVariable Long taskId) {
+        return R.ok(fileService.getCompletedChunks(UserContext.getUserId(), taskId));
+    }
+
+    /**
+     * 删除上传任务及所有分片（存储 + DB）
+     */
+    @DeleteMapping("/upload/tasks/{taskId}")
+    public R<Void> deleteUploadTask(@PathVariable Long taskId) {
+        fileService.deleteUploadTask(UserContext.getUserId(), taskId);
+        return R.ok();
     }
 
     /**
@@ -151,7 +240,7 @@ public class FileController {
                 + "/" + originalName;
 
         try {
-            storageService.store(storageKey, file.getBytes());
+            storageService.store(storageKey, file.getInputStream());
             ItemVO vo = fileService.createFile(
                     UserContext.getUserId(), parentId, originalName,
                     file.getSize(), file.getContentType(), storageKey);
@@ -174,13 +263,34 @@ public class FileController {
     }
 
     /**
-     * 文件预览（浏览器内联展示）
+     * 文件预览（浏览器内联展示）。
+     * 对 Office 文档（doc/docx/xls/xlsx/ppt/pptx）自动转为 PDF 后再展示。
      */
     @GetMapping("/preview/{id}")
     public void previewFile(@PathVariable Long id,
                              HttpServletRequest request,
                              HttpServletResponse response) throws IOException {
         FileDownloadVO info = fileService.getPreviewInfo(UserContext.getUserId(), id);
+
+        // Office 文档：转为 PDF 后再返回
+        if (documentConversionService.isOfficeFile(info.getFileName())) {
+            try (InputStream is = storageService.getInputStream(info.getStorageKey())) {
+                byte[] pdfBytes = documentConversionService.convertToPdf(is, info.getFileName());
+                String encodedName = URLEncoder.encode(
+                        info.getFileName().replaceAll("\\.[^.]+$", "") + ".pdf",
+                        StandardCharsets.UTF_8).replace("+", "%20");
+                response.setHeader("Content-Disposition", "inline; filename=\"" + encodedName + "\"");
+                response.setContentType("application/pdf");
+                response.setContentLengthLong(pdfBytes.length);
+                response.getOutputStream().write(pdfBytes);
+                response.getOutputStream().flush();
+            } catch (Exception e) {
+                log.warn("Office 预览转换失败，回退到原始文件: {}", info.getFileName(), e);
+                streamFile(info, request, response, "inline");
+            }
+            return;
+        }
+
         streamFile(info, request, response, "inline");
     }
 
@@ -238,6 +348,16 @@ public class FileController {
      */
     private void streamFile(FileDownloadVO info, HttpServletRequest request,
                              HttpServletResponse response, String disposition) throws IOException {
+        // 先验证文件在存储中是否存在，避免 header 提交后才抛出异常
+        InputStream sourceStream;
+        try {
+            sourceStream = storageService.getInputStream(info.getStorageKey());
+        } catch (Exception e) {
+            log.warn("文件存储不存在: storageKey={}", info.getStorageKey(), e);
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "文件不存在或已被删除");
+            return;
+        }
+
         String encodedName = URLEncoder.encode(info.getFileName(), StandardCharsets.UTF_8)
                 .replace("+", "%20");
         response.setHeader("Content-Disposition",
@@ -248,7 +368,7 @@ public class FileController {
         long fileSize = info.getFileSize();
         String rangeHeader = request.getHeader("Range");
 
-        try (InputStream is = storageService.getInputStream(info.getStorageKey())) {
+        try (InputStream is = sourceStream) {
             if (rangeHeader == null) {
                 // 全量输出
                 response.setContentLengthLong(fileSize);
@@ -287,8 +407,11 @@ public class FileController {
                     response.setHeader("Content-Range", "bytes " + start + "-" + end + "/" + fileSize);
                     response.setContentLengthLong(contentLength);
 
-                    is.skip(start);
-                    copy(is, response.getOutputStream(), contentLength);
+                    // 使用服务端范围读取（OSS 等后端可节省带宽），只用 InputStream.close() 后 sourceStream 也被关
+                    is.close();
+                    try (InputStream ranged = storageService.getInputStream(info.getStorageKey(), start, end)) {
+                        copy(ranged, response.getOutputStream(), contentLength);
+                    }
                 } catch (NumberFormatException e) {
                     log.warn("无效的 Range 请求头: {}", rangeHeader);
                     response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid Range header");

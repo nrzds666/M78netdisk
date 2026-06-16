@@ -21,6 +21,9 @@ public class UploadChunk implements Serializable {
 
     private Integer chunkIndex;
 
+    /** OSS MultipartUpload 的 partNumber（从 1 开始） */
+    private Integer partNumber;
+
     private Integer size;
 
     private String etag;

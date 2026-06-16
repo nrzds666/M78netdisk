@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS upload_tasks (
     received_chunks INT NOT NULL DEFAULT 0,
     status          VARCHAR(20) NOT NULL DEFAULT 'pending',
     storage_prefix  TEXT NOT NULL,
+    upload_id       VARCHAR(255) COMMENT 'OSS MultipartUpload uploadId',
+    merged_key      VARCHAR(1024) COMMENT '合并后的 storageKey（OSS 用 CompleteMultipartUpload 写入）',
     expires_at      DATETIME NOT NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -177,7 +179,8 @@ CREATE TABLE IF NOT EXISTS upload_chunks (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     task_id     BIGINT NOT NULL,
     chunk_index INT NOT NULL,
-    size        INT NOT NULL,
+    part_number INT NULL,
+    size INT NOT NULL,
     etag        VARCHAR(64),
     storage_key TEXT NOT NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -298,6 +301,42 @@ CREATE TABLE IF NOT EXISTS album_items (
 CREATE INDEX idx_album_items_album ON album_items(album_id, added_at DESC);
 CREATE INDEX idx_album_items_item ON album_items(item_id);
 
+
+-- ============================================================
+-- 6. 保险箱
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_vaults (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_user_vaults_user ON user_vaults(user_id);
+
+
+-- ============================================================
+-- 10. 相册分享
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS album_shares (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    album_id      BIGINT NOT NULL,
+    user_id       BIGINT NOT NULL,
+    share_token   VARCHAR(36) NOT NULL UNIQUE,
+    expire_at     DATETIME,
+    is_active     TINYINT(1) NOT NULL DEFAULT 1,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_album_shares_token ON album_shares(share_token);
+CREATE INDEX idx_album_shares_album ON album_shares(album_id, is_active);
 
 -- ============================================================
 -- 完成

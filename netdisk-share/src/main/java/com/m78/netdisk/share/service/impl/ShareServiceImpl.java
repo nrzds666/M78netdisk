@@ -18,6 +18,8 @@ import com.m78.netdisk.share.mapper.ReceivedShareMapper;
 import com.m78.netdisk.share.domain.vo.ShareVO;
 import com.m78.netdisk.share.mapper.ShareMapper;
 import com.m78.netdisk.share.service.IShareService;
+import com.m78.netdisk.user.domain.po.User;
+import com.m78.netdisk.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -41,6 +43,7 @@ public class ShareServiceImpl implements IShareService {
     private final StringRedisTemplate redisTemplate;
     private final ReceivedShareMapper receivedShareMapper;
     private final StorageService storageService;
+    private final UserMapper userMapper;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Override
@@ -124,7 +127,8 @@ public class ShareServiceImpl implements IShareService {
 
         if (StrUtil.isNotBlank(share.getPasswordHash())) {
             if (StrUtil.isBlank(password)) {
-                throw new BizException(403, "需要提取码");
+                // Return basic info without granting access
+                return toShareVO(share, false);
             }
             if (!passwordEncoder.matches(password, share.getPasswordHash())) {
                 // Record failed attempt
@@ -347,7 +351,7 @@ public class ShareServiceImpl implements IShareService {
                 });
     }
 
-    private ShareVO toShareVO(Share share) {
+    private ShareVO toShareVO(Share share, boolean accessGranted) {
         if (share == null) return null;
 
         // 查文件信息
@@ -382,7 +386,14 @@ public class ShareServiceImpl implements IShareService {
                 .mimeType(mimeType)
                 .expireLabel(determineExpireLabel(share.getExpireAt()))
                 .isReceived(false)
+                .accessGranted(accessGranted)
+                .ownerName(lookupOwnerName(share.getOwnerId()))
+                .ownerAvatar(lookupOwnerAvatar(share.getOwnerId()))
                 .build();
+    }
+
+    private ShareVO toShareVO(Share share) {
+        return toShareVO(share, true);
     }
 
     private String determineExpireLabel(LocalDateTime expireAt) {
@@ -391,6 +402,18 @@ public class ShareServiceImpl implements IShareService {
         if (hours <= 24) return "一天";
         if (hours <= 168) return "一周";
         return "一个月";
+    }
+
+    private String lookupOwnerName(Long ownerId) {
+        if (ownerId == null) return null;
+        User user = userMapper.selectById(ownerId);
+        return user != null ? user.getUsername() : null;
+    }
+
+    private String lookupOwnerAvatar(Long ownerId) {
+        if (ownerId == null) return null;
+        User user = userMapper.selectById(ownerId);
+        return user != null ? user.getAvatarUrl() : null;
     }
 
     private ItemVO itemToItemVO(Item item) {

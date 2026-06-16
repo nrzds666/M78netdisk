@@ -34,6 +34,7 @@
         <jjwt.version>0.12.6</jjwt.version>
         <mysql.version>8.0.33</mysql.version>
         <aliyun-oss.version>3.17.4</aliyun-oss.version>
+        <jodconverter.version>4.4.8</jodconverter.version>
     </properties>
 
 
@@ -77,6 +78,17 @@
                 <groupId>com.aliyun.oss</groupId>
                 <artifactId>aliyun-sdk-oss</artifactId>
                 <version>${aliyun-oss.version}</version>
+            </dependency>
+            <!-- jodconverter Office 转 PDF -->
+            <dependency>
+                <groupId>org.jodconverter</groupId>
+                <artifactId>jodconverter-spring-boot-starter</artifactId>
+                <version>${jodconverter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jodconverter</groupId>
+                <artifactId>jodconverter-local</artifactId>
+                <version>${jodconverter.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

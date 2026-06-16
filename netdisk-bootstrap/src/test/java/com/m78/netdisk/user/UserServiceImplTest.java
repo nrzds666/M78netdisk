@@ -415,6 +415,22 @@ class UserServiceImplTest {
             assertTrue(encoder.matches(newPassword, updatedUser.getPasswordHash()));
             assertFalse(encoder.matches(oldPassword, updatedUser.getPasswordHash()));
         }
+
+        @Test
+        @DisplayName("新密码与当前密码相同应拒绝")
+        void updatePassword_shouldRejectSamePassword() {
+            String password = "myPassword123";
+            User user = new User()
+                    .setId(USER_ID)
+                    .setPasswordHash(encoder.encode(password));
+
+            when(userMapper.selectById(USER_ID)).thenReturn(user);
+
+            BizException ex = assertThrows(BizException.class,
+                    () -> userService.updatePassword(USER_ID, password, password));
+            assertTrue(ex.getMessage().contains("新密码") && ex.getMessage().contains("相同"));
+            verify(jwtTool, never()).logout(anyLong());
+        }
     }
 
     // ========================================================================

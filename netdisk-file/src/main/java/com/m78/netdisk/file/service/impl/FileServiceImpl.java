@@ -1,6 +1,7 @@
 package com.m78.netdisk.file.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.m78.netdisk.common.exception.BizException;
@@ -22,19 +23,22 @@ import com.m78.netdisk.file.mapper.MediaProgressMapper;
 import com.m78.netdisk.file.mapper.UploadChunkMapper;
 import com.m78.netdisk.file.mapper.UploadTaskMapper;
 import com.m78.netdisk.file.service.IFileService;
+import com.m78.netdisk.file.service.impl.UploadMergeService;
 import com.m78.netdisk.user.domain.po.User;
 import com.m78.netdisk.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -50,17 +54,45 @@ public class FileServiceImpl implements IFileService {
     private final StorageService storageService;
     private final UserMapper userMapper;
     private final MediaProgressMapper mediaProgressMapper;
+    private final UploadMergeService uploadMergeService;
 
     // ==================== 文件/文件夹 CRUD ====================
 
     @Override
     public IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer pageNum, Integer size) {
+        return listItems(ownerId, parentId, pageNum, size, null, null, null, null);
+    }
+
+    @Override
+    public IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer pageNum, Integer size,
+                                   String query, String mimePrefix, String dateFrom, String dateTo) {
+        return listItems(ownerId, parentId, pageNum, size, query, mimePrefix, null, null, dateFrom, dateTo);
+    }
+
+    @Override
+    public IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer pageNum, Integer size,
+                                   String query, String mimePrefix,
+                                   java.util.List<String> mimeTypes, String excludePrefix,
+                                   String dateFrom, String dateTo) {
         Page<Item> page = new Page<>(pageNum, Math.min(size, 100));
+
+        // 如果有筛选条件，使用筛选查询
+        boolean hasFilter = (query != null && !query.isEmpty())
+                || (mimePrefix != null && !mimePrefix.isEmpty())
+                || (mimeTypes != null && !mimeTypes.isEmpty())
+                || excludePrefix != null
+                || dateFrom != null || dateTo != null;
+
         IPage<Item> itemPage;
-        if (parentId == null || parentId == 0) {
-            itemPage = itemMapper.selectRootItems(page, ownerId);
+        if (hasFilter) {
+            Long pid = (parentId == null || parentId == 0) ? null : parentId;
+            itemPage = itemMapper.selectFilteredItems(page, ownerId, pid, query, mimePrefix, mimeTypes, excludePrefix, dateFrom, dateTo);
         } else {
-            itemPage = itemMapper.selectChildren(page, ownerId, parentId);
+            if (parentId == null || parentId == 0) {
+                itemPage = itemMapper.selectRootItems(page, ownerId);
+            } else {
+                itemPage = itemMapper.selectChildren(page, ownerId, parentId);
+            }
         }
         return itemPage.convert(this::toItemVO);
     }
@@ -71,7 +103,7 @@ public class FileServiceImpl implements IFileService {
                               Long fileSize, String mimeType, String storageKey) {
         if (fileName == null || fileName.trim().isEmpty() ||
             fileName.contains("/") || fileName.contains("\\") ||
-            fileName.contains("..") || fileName.contains("\0")) {
+            fileName.equals("..") || fileName.contains("\0")) {
             throw new BizException("文件名包含非法字符");
         }
         Long pid = parentId != null && parentId > 0 ? parentId : null;
@@ -121,7 +153,7 @@ public class FileServiceImpl implements IFileService {
         if (name == null || name.trim().isEmpty()) {
             throw new BizException("文件夹名称不能为空");
         }
-        if (name.contains("/") || name.contains("\\") || name.contains("..") || name.contains("\0")) {
+        if (name.contains("/") || name.contains("\\") || name.equals("..") || name.contains("\0")) {
             throw new BizException("文件夹名称包含非法字符");
         }
         Long parentId = dto.getParentId() == null || dto.getParentId() == 0 ? null : dto.getParentId();
@@ -158,7 +190,7 @@ public class FileServiceImpl implements IFileService {
         String newName = dto.getNewName();
         if (newName == null || newName.trim().isEmpty() ||
             newName.contains("/") || newName.contains("\\") ||
-            newName.contains("..") || newName.contains("\0")) {
+            newName.equals("..") || newName.contains("\0")) {
             throw new BizException("文件名包含非法字符");
         }
         item.setName(newName);
@@ -391,7 +423,7 @@ public class FileServiceImpl implements IFileService {
         String fileName = dto.getFileName();
         if (fileName == null || fileName.trim().isEmpty() ||
             fileName.contains("/") || fileName.contains("\\") ||
-            fileName.contains("..") || fileName.contains("\0")) {
+            fileName.equals("..") || fileName.contains("\0")) {
             throw new BizException("文件名包含非法字符");
         }
 
@@ -408,7 +440,11 @@ public class FileServiceImpl implements IFileService {
 
         int chunkSize = dto.getChunkSize() != null ? dto.getChunkSize() : 5242880;
         int totalChunks = (int) Math.ceil((double) dto.getFileSize() / chunkSize);
-        String storagePrefix = "uploads/" + UUID.randomUUID().toString().replace("-", "");
+        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        String fileExt = getFileExtension(dto.getFileName());
+        String fileCategory = getFileCategory(fileExt);
+        String storagePrefix = "uploads/" + dateStr + "/" + fileCategory
+                + "/" + UUID.randomUUID().toString().replace("-", "");
 
         UploadTask task = new UploadTask()
                 .setOwnerId(ownerId)
@@ -422,6 +458,17 @@ public class FileServiceImpl implements IFileService {
                 .setStatus("pending")
                 .setStoragePrefix(storagePrefix)
                 .setExpiresAt(LocalDateTime.now().plusHours(24));
+
+        // OSS 路径：提前初始化 MultipartUpload，合并时无需回读分片
+        String mergedKey = storagePrefix + "/" + dto.getFileName();
+        task.setMergedKey(mergedKey);
+        try {
+            String uploadId = storageService.initiateMultipartUpload(mergedKey);
+            task.setUploadId(uploadId);
+        } catch (UnsupportedOperationException e) {
+            // Local 存储不支持 MultipartUpload，沿用旧方案
+            log.debug("存储后端不支持 MultipartUpload，使用流式合并");
+        }
 
         uploadTaskMapper.insert(task);
         return toUploadTaskVO(task);
@@ -465,6 +512,120 @@ public class FileServiceImpl implements IFileService {
     }
 
     @Override
+    public void uploadChunk(Long ownerId, Long taskId, Integer chunkIndex,
+                            MultipartFile file) {
+        UploadTask task = uploadTaskMapper.selectById(taskId);
+        if (task == null) {
+            log.warn("上传任务不存在: taskId={}, ownerId={}", taskId, ownerId);
+            throw new BizException("上传任务不存在");
+        }
+        if (!task.getOwnerId().equals(ownerId)) {
+            log.warn("上传任务归属不匹配: taskId={}, ownerId={}, taskOwnerId={}",
+                    taskId, ownerId, task.getOwnerId());
+            throw new BizException("上传任务不存在");
+        }
+        if (chunkIndex < 0 || chunkIndex >= task.getTotalChunks()) {
+            throw new BizException("分片序号不合法");
+        }
+
+        log.info("uploadChunk 开始: taskId={}, chunkIndex={}, status={}, receivedChunks={}",
+                taskId, chunkIndex, task.getStatus(), task.getReceivedChunks());
+
+        // Step 1: 更新状态和过期时间（轻量事务）
+        uploadChunkPrepare(taskId, task.getStatus());
+
+        // Step 2: OSS 分片上传（长耗时，不在事务内）
+        String partEtag = null;
+        if (task.getUploadId() != null) {
+            try {
+                partEtag = storageService.uploadPart(task.getMergedKey(), task.getUploadId(),
+                        chunkIndex + 1, file.getInputStream());
+            } catch (IOException e) {
+                log.error("OSS 分片上传失败: taskId={}, chunkIndex={}", taskId, chunkIndex, e);
+                throw new BizException("分片上传失败");
+            }
+        } else {
+            // Local 路径
+            String storageKey = task.getStoragePrefix() + "/chunk_" + chunkIndex;
+            try {
+                storageService.store(storageKey, file.getInputStream());
+            } catch (IOException e) {
+                log.error("分片存储失败: taskId={}, chunkIndex={}", taskId, chunkIndex, e);
+                throw new BizException("分片上传失败");
+            }
+        }
+
+        // 上传完成后重新检查任务是否还存在（长时间上传期间可能已被取消/过期）
+        UploadTask taskAfterUpload = uploadTaskMapper.selectById(taskId);
+        if (taskAfterUpload == null) {
+            log.warn("上传任务已删除，跳过分片记录: taskId={}, chunkIndex={}", taskId, chunkIndex);
+            return;
+        }
+        if ("expired".equals(taskAfterUpload.getStatus()) || "canceled".equals(taskAfterUpload.getStatus())) {
+            log.warn("上传任务已{}，跳过分片记录: taskId={}, chunkIndex={}",
+                    taskAfterUpload.getStatus(), taskId, chunkIndex);
+            return;
+        }
+
+        // Step 3: 记录分片 + 递增计数器（轻量事务）
+        uploadChunkRecord(taskId, chunkIndex, partEtag, (int) file.getSize(),
+                task.getUploadId() != null ? task.getMergedKey() : null,
+                task.getStoragePrefix());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void uploadChunkPrepare(Long taskId, String currentStatus) {
+        if ("pending".equals(currentStatus)) {
+            uploadTaskMapper.update(null,
+                new LambdaUpdateWrapper<UploadTask>()
+                    .eq(UploadTask::getId, taskId)
+                    .set(UploadTask::getStatus, "uploading"));
+        }
+        uploadTaskMapper.update(null,
+                new LambdaUpdateWrapper<UploadTask>()
+                        .eq(UploadTask::getId, taskId)
+                        .set(UploadTask::getExpiresAt, LocalDateTime.now().plusHours(24)));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void uploadChunkRecord(Long taskId, Integer chunkIndex, String partEtag,
+                                   Integer size, String mergedKey, String storagePrefix) {
+        if (partEtag != null) {
+            try {
+                UploadChunk chunk = new UploadChunk()
+                        .setTaskId(taskId)
+                        .setChunkIndex(chunkIndex)
+                        .setPartNumber(chunkIndex + 1)
+                        .setEtag(partEtag)
+                        .setSize(size)
+                        .setStorageKey(mergedKey);
+                int insertResult = uploadChunkMapper.insert(chunk);
+                log.info("uploadChunk insert 结果: taskId={}, chunkIndex={}, insertResult={}",
+                        taskId, chunkIndex, insertResult);
+                int incrementResult = uploadTaskMapper.incrementReceivedChunks(taskId);
+                log.info("uploadChunk increment 结果: taskId={}, chunkIndex={}, incrementResult={}",
+                        taskId, chunkIndex, incrementResult);
+            } catch (DuplicateKeyException e) {
+                log.warn("uploadChunk 幂等跳过: taskId={}, chunkIndex={}", taskId, chunkIndex);
+            }
+        } else {
+            String storageKey = storagePrefix + "/chunk_" + chunkIndex;
+            try {
+                UploadChunk chunk = new UploadChunk()
+                        .setTaskId(taskId)
+                        .setChunkIndex(chunkIndex)
+                        .setSize(size)
+                        .setEtag("")
+                        .setStorageKey(storageKey);
+                uploadChunkMapper.insert(chunk);
+                uploadTaskMapper.incrementReceivedChunks(taskId);
+            } catch (DuplicateKeyException e) {
+                log.debug("分片已存在（幂等），跳过: taskId={}, chunkIndex={}", taskId, chunkIndex);
+            }
+        }
+    }
+
+    @Override
     @Transactional
     public void cancelUpload(Long ownerId, Long taskId) {
         UploadTask task = uploadTaskMapper.selectById(taskId);
@@ -480,6 +641,14 @@ public class FileServiceImpl implements IFileService {
                 storageService.delete(chunk.getStorageKey());
             }
         }
+        // OSS multipart 需额外 abort
+        if (task.getUploadId() != null) {
+            try {
+                storageService.abortMultipartUpload(task.getMergedKey(), task.getUploadId());
+            } catch (Exception e) {
+                log.warn("OSS abortMultipartUpload 失败: taskId={}", taskId, e);
+            }
+        }
         uploadChunkMapper.delete(
                 new LambdaQueryWrapper<UploadChunk>().eq(UploadChunk::getTaskId, taskId));
 
@@ -490,59 +659,89 @@ public class FileServiceImpl implements IFileService {
 
     @Override
     @Transactional
+    public void pauseUpload(Long ownerId, Long taskId) {
+        UploadTask task = uploadTaskMapper.selectById(taskId);
+        if (task == null || !task.getOwnerId().equals(ownerId)) {
+            throw new BizException("上传任务不存在");
+        }
+        task.setStatus("paused");
+        uploadTaskMapper.updateById(task);
+        log.info("上传任务已暂停: taskId={}, fileName={}", taskId, task.getFileName());
+    }
+
+    @Override
+    @Transactional
     public UploadTaskVO completeUpload(Long ownerId, Long taskId) {
         UploadTask task = uploadTaskMapper.selectById(taskId);
         if (task == null || !task.getOwnerId().equals(ownerId)) {
             throw new BizException("上传任务不存在");
         }
+        if ("expired".equals(task.getStatus()) || "completed".equals(task.getStatus())) {
+            throw new BizException("上传任务已过期或已完成");
+        }
+        log.info("completeUpload 开始: taskId={}, receivedChunks={}, totalChunks={}, status={}",
+                taskId, task.getReceivedChunks(), task.getTotalChunks(), task.getStatus());
         if (task.getReceivedChunks() < task.getTotalChunks()) {
             throw new BizException("分片尚未全部上传完成: " +
                     task.getReceivedChunks() + "/" + task.getTotalChunks());
         }
 
-        String path = buildPath(ownerId, task.getParentId(), task.getFileName());
-
-        // 合并所有分片为一个文件
-        List<UploadChunk> chunks = uploadChunkMapper.selectList(
-                new LambdaQueryWrapper<UploadChunk>()
-                        .eq(UploadChunk::getTaskId, taskId)
-                        .orderByAsc(UploadChunk::getChunkIndex));
-        String mergedStorageKey = mergeChunks(chunks, task.getFileName());
-
-        Item item = new Item()
-                .setOwnerId(ownerId)
-                .setParentId(task.getParentId())
-                .setName(task.getFileName())
-                .setIsDirectory(false)
-                .setSize(task.getFileSize())
-                .setMimeType(task.getMimeType())
-                .setStorageKey(mergedStorageKey)
-                .setPath(path)
-                .setVersion(1);
-
-
-        itemMapper.insert(item);
-
-        ItemVersion version = new ItemVersion()
-                .setItemId(item.getId())
-                .setVersion(1)
-                .setSize(task.getFileSize())
-                .setStorageKey(mergedStorageKey)
-                .setCreatedBy(ownerId);
-        itemVersionMapper.insert(version);
-
-        // 原子增用量，超配额则回滚
-        if (userMapper.tryAddUsedBytes(ownerId, task.getFileSize()) == 0) {
-            itemMapper.deleteById(item.getId());
-            itemVersionMapper.deleteById(version.getId());
-            throw new BizException("存储空间不足，无法完成上传");
+        // 重名检查
+        if (itemMapper.countByName(ownerId, task.getParentId(), task.getFileName()) > 0) {
+            throw new BizException("该目录下已存在同名文件");
         }
 
-        task.setStatus("completed");
-        uploadTaskMapper.updateById(task);
+        if (task.getUploadId() != null) {
+            // OSS 路径：CompleteMultipartUpload 毫秒级合并
+            task.setStatus("merging");
+            uploadTaskMapper.updateById(task);
+            try {
+                List<UploadChunk> chunks = uploadChunkMapper.selectList(
+                        new LambdaQueryWrapper<UploadChunk>()
+                                .eq(UploadChunk::getTaskId, taskId)
+                                .orderByAsc(UploadChunk::getPartNumber));
+                List<String> partETags = chunks.stream()
+                        .map(UploadChunk::getEtag)
+                        .collect(Collectors.toList());
+                storageService.completeMultipartUpload(task.getMergedKey(), task.getUploadId(), partETags);
 
-        log.info("上传完成: userId={}, fileName={}, size={}, itemId={}",
-                ownerId, task.getFileName(), task.getFileSize(), item.getId());
+                // 创建 Item + ItemVersion
+                String path = buildPath(ownerId, task.getParentId(), task.getFileName());
+                Item item = new Item()
+                        .setOwnerId(ownerId).setParentId(task.getParentId())
+                        .setName(task.getFileName()).setIsDirectory(false)
+                        .setSize(task.getFileSize()).setMimeType(task.getMimeType())
+                        .setStorageKey(task.getMergedKey()).setPath(path).setVersion(1);
+                itemMapper.insert(item);
+
+                ItemVersion version = new ItemVersion()
+                        .setItemId(item.getId()).setVersion(1)
+                        .setSize(task.getFileSize()).setStorageKey(task.getMergedKey())
+                        .setCreatedBy(ownerId);
+                itemVersionMapper.insert(version);
+
+                if (userMapper.tryAddUsedBytes(ownerId, task.getFileSize()) == 0) {
+                    itemMapper.deleteById(item.getId());
+                    itemVersionMapper.deleteById(version.getId());
+                    throw new BizException("存储空间不足，无法完成上传");
+                }
+
+                task.setStatus("completed");
+                uploadTaskMapper.updateById(task);
+                log.info("上传完成(MPU): userId={}, fileName={}, size={}",
+                        ownerId, task.getFileName(), task.getFileSize());
+            } catch (Exception e) {
+                log.error("OSS CompleteMultipartUpload 失败: taskId={}", taskId, e);
+                task.setStatus("failed");
+                uploadTaskMapper.updateById(task);
+                throw new BizException("文件合并失败: " + e.getMessage());
+            }
+        } else {
+            // Local 路径：标记合并中，异步流式合并
+            task.setStatus("merging");
+            uploadTaskMapper.updateById(task);
+            uploadMergeService.performMerge(ownerId, taskId);
+        }
 
         return toUploadTaskVO(task);
     }
@@ -554,6 +753,55 @@ public class FileServiceImpl implements IFileService {
             throw new BizException("上传任务不存在");
         }
         return toUploadTaskVO(task);
+    }
+
+    @Override
+    public List<UploadTaskVO> listUnfinishedTasks(Long ownerId) {
+        List<UploadTask> tasks = uploadTaskMapper.selectList(
+                new LambdaQueryWrapper<UploadTask>()
+                        .eq(UploadTask::getOwnerId, ownerId)
+                        .in(UploadTask::getStatus, "pending", "uploading", "merging", "paused")
+                        .orderByDesc(UploadTask::getCreatedAt));
+        return tasks.stream().map(this::toUploadTaskVO).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<Integer> getCompletedChunks(Long ownerId, Long taskId) {
+        UploadTask task = uploadTaskMapper.selectById(taskId);
+        if (task == null || !task.getOwnerId().equals(ownerId)) {
+            throw new BizException("上传任务不存在");
+        }
+        return uploadChunkMapper.selectList(
+                new LambdaQueryWrapper<UploadChunk>()
+                        .eq(UploadChunk::getTaskId, taskId)
+                        .select(UploadChunk::getChunkIndex))
+                .stream()
+                .map(UploadChunk::getChunkIndex)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public void deleteUploadTask(Long ownerId, Long taskId) {
+        UploadTask task = uploadTaskMapper.selectById(taskId);
+        if (task == null || !task.getOwnerId().equals(ownerId)) {
+            throw new BizException("上传任务不存在");
+        }
+
+        // 清理分片物理存储
+        List<UploadChunk> chunks = uploadChunkMapper.selectList(
+                new LambdaQueryWrapper<UploadChunk>().eq(UploadChunk::getTaskId, taskId));
+        for (UploadChunk chunk : chunks) {
+            if (chunk.getStorageKey() != null) {
+                try { storageService.delete(chunk.getStorageKey()); } catch (Exception ignored) {}
+            }
+        }
+        // 清理 DB
+        uploadChunkMapper.delete(
+                new LambdaQueryWrapper<UploadChunk>().eq(UploadChunk::getTaskId, taskId));
+        uploadTaskMapper.deleteById(taskId);
+
+        log.info("上传任务已删除: taskId={}, fileName={}", taskId, task.getFileName());
     }
 
     // ==================== 下载/预览/ZIP ====================
@@ -777,6 +1025,7 @@ public class FileServiceImpl implements IFileService {
                 .id(item.getId()).ownerId(item.getOwnerId()).parentId(item.getParentId())
                 .name(item.getName()).isDirectory(item.getIsDirectory()).size(item.getSize())
                 .mimeType(item.getMimeType()).etag(item.getEtag()).thumbnailKey(item.getThumbnailKey())
+                .storageKey(item.getStorageKey())
                 .path(item.getPath()).version(item.getVersion()).isFromShare(item.getIsFromShare())
                 .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
                 .updatedAt(item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null)
@@ -830,31 +1079,40 @@ public class FileServiceImpl implements IFileService {
         return false;
     }
 
+    // ==================== OSS 存储路径辅助 ====================
+
     /**
-     * 合并分片为一个完整的文件，返回合并后的 storageKey
+     * 提取文件扩展名（小写）. "demo.mp4" → "mp4", "archive.tar.gz" → "tar.gz"
      */
-    private String mergeChunks(List<UploadChunk> chunks, String fileName) {
-        if (chunks == null || chunks.isEmpty()) {
-            throw new BizException("没有分片可合并");
-        }
-        String mergedKey = "merged/" + UUID.randomUUID().toString().replace("-", "") + "/" + fileName;
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            for (UploadChunk chunk : chunks) {
-                if (chunk.getStorageKey() != null) {
-                    try (InputStream is = storageService.getInputStream(chunk.getStorageKey())) {
-                        int len;
-                        while ((len = is.read(buf)) != -1) {
-                            baos.write(buf, 0, len);
-                        }
-                    }
-                }
-            }
-            storageService.store(mergedKey, baos.toByteArray());
-            return mergedKey;
-        } catch (IOException e) {
-            throw new RuntimeException("合并分片失败", e);
+    public static String getFileExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        if (dot <= 0) return "";
+        return fileName.substring(dot + 1).toLowerCase();
+    }
+
+    /**
+     * 根据扩展名返回文件分类：video/audio/image/document/archive/other
+     */
+    public static String getFileCategory(String ext) {
+        if (ext == null || ext.isEmpty()) return "other";
+        switch (ext) {
+            case "mp4": case "avi": case "mkv": case "mov": case "wmv":
+            case "flv": case "webm": case "mpeg": case "mpg":
+                return "video";
+            case "mp3": case "wav": case "flac": case "aac": case "ogg":
+            case "wma": case "m4a":
+                return "audio";
+            case "jpg": case "jpeg": case "png": case "gif": case "bmp":
+            case "webp": case "svg": case "ico":
+                return "image";
+            case "pdf": case "doc": case "docx": case "xls": case "xlsx":
+            case "ppt": case "pptx": case "txt": case "md": case "csv":
+                return "document";
+            case "zip": case "rar": case "7z": case "tar": case "gz":
+            case "bz2":
+                return "archive";
+            default:
+                return "other";
         }
     }
 }

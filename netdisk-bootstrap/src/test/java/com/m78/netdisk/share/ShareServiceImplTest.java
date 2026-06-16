@@ -46,6 +46,7 @@ class ShareServiceImplTest {
     @Mock private ValueOperations<String, String> valueOps;
     @Mock private ReceivedShareMapper receivedShareMapper;
     @Mock private StorageService storageService;
+    @Mock private com.m78.netdisk.user.mapper.UserMapper userMapper;
 
     @InjectMocks
     private ShareServiceImpl shareService;
@@ -327,7 +328,7 @@ class ShareServiceImplTest {
     }
 
     @Test
-    void accessShare_shouldRequirePasswordWhenSet() {
+    void accessShare_shouldReturnPartialInfoWhenPasswordNotProvided() {
         String realHash = encoder.encode("secret");
 
         Share share = new Share()
@@ -337,11 +338,55 @@ class ShareServiceImplTest {
                 .setShareToken(SHARE_TOKEN)
                 .setPasswordHash(realHash);
 
+        Item item = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setName("secret.pdf")
+                .setIsDirectory(false);
+
         when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
         when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
 
-        assertThrows(BizException.class,
-                () -> shareService.accessShare(SHARE_TOKEN, null));
+        ShareVO vo = shareService.accessShare(SHARE_TOKEN, null);
+
+        assertNotNull(vo);
+        assertEquals(SHARE_TOKEN, vo.getShareToken());
+        assertTrue(vo.getHasPassword());
+        assertFalse(vo.getAccessGranted());
+        assertEquals("secret.pdf", vo.getFileName());
+        assertFalse(vo.getIsDirectory());
+    }
+
+    @Test
+    void accessShare_shouldReturnOwnerName() {
+        Share share = new Share()
+                .setId(1L)
+                .setOwnerId(OWNER_ID)
+                .setItemId(ITEM_ID)
+                .setShareToken(SHARE_TOKEN);
+
+        Item item = new Item()
+                .setId(ITEM_ID)
+                .setOwnerId(OWNER_ID)
+                .setName("secret.pdf")
+                .setIsDirectory(false);
+
+        com.m78.netdisk.user.domain.po.User owner = new com.m78.netdisk.user.domain.po.User()
+                .setId(OWNER_ID)
+                .setUsername("张三")
+                .setAvatarUrl("https://example.com/avatar.png");
+
+        when(shareMapper.selectValidShare(SHARE_TOKEN)).thenReturn(share);
+        when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+        when(redisTemplate.hasKey("share:lock:" + SHARE_TOKEN)).thenReturn(false);
+        when(userMapper.selectById(OWNER_ID)).thenReturn(owner);
+
+        ShareVO vo = shareService.accessShare(SHARE_TOKEN, null);
+
+        assertNotNull(vo);
+        assertEquals("张三", vo.getOwnerName());
+        assertEquals("https://example.com/avatar.png", vo.getOwnerAvatar());
     }
 
     @Test

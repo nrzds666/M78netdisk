@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.album.domain.dto.AddItemsDTO;
 import com.m78.netdisk.album.domain.dto.CreateAlbumDTO;
 import com.m78.netdisk.album.domain.dto.UpdateAlbumDTO;
+import com.m78.netdisk.album.domain.vo.AlbumShareVO;
 import com.m78.netdisk.album.domain.vo.AlbumVO;
+import com.m78.netdisk.album.service.IAlbumShareService;
 import com.m78.netdisk.album.service.IAlbumService;
 import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.utils.UserContext;
@@ -12,7 +14,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
+import java.io.IOException;
 import java.util.List;
 
 @Slf4j
@@ -22,6 +27,7 @@ import java.util.List;
 public class AlbumController {
 
     private final IAlbumService albumService;
+    private final IAlbumShareService albumShareService;
 
     @PostMapping
     public R<AlbumVO> createAlbum(@Valid @RequestBody CreateAlbumDTO dto) {
@@ -73,5 +79,32 @@ public class AlbumController {
     public R<AlbumVO> setCover(@PathVariable Long id,
                                 @RequestParam Long itemId) {
         return R.ok(albumService.setCover(UserContext.getUserId(), id, itemId));
+    }
+
+    // ─── Album Share ───
+
+    @PostMapping("/{id}/share")
+    public R<AlbumShareVO> createShare(@PathVariable Long id,
+                                        @RequestParam(required = false) Integer expireDays) {
+        return R.ok(albumShareService.createShare(UserContext.getUserId(), id, expireDays));
+    }
+
+    /**
+     * Public endpoint — no auth required via WebConfig exclude
+     */
+    @GetMapping("/share-access/{token}")
+    public R<AlbumVO> getSharedAlbum(@PathVariable String token) {
+        return R.ok(albumShareService.getSharedAlbum(token));
+    }
+
+    /**
+     * Public endpoint — preview a file from a shared album (no auth)
+     */
+    @GetMapping("/share-access/{token}/preview/{itemId}")
+    public void previewSharedAlbumFile(@PathVariable String token,
+                                        @PathVariable Long itemId,
+                                        HttpServletRequest request,
+                                        HttpServletResponse response) throws IOException {
+        albumShareService.streamSharedAlbumFile(token, itemId, request, response);
     }
 }

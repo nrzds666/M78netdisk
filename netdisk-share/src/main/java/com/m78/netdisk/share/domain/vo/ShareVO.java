@@ -35,4 +35,11 @@ public class ShareVO {
 
     // 来源标记：是否为接收的分享文件
     private Boolean isFromShare;
+
+    // 访问已授权（密码验证通过或无需密码）
+    private Boolean accessGranted;
+
+    // 分享者信息
+    private String ownerName;
+    private String ownerAvatar;
 }

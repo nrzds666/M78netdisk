@@ -121,6 +121,9 @@ public class UserServiceImpl implements IUserService {
         if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
             throw new BizException("原密码错误");
         }
+        if (oldPassword.equals(newPassword)) {
+            throw new BizException("新密码不能与当前密码相同");
+        }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userMapper.updateById(user);
         // 强制所有设备重新登录
@@ -142,6 +145,31 @@ public class UserServiceImpl implements IUserService {
     @Transactional
     public void logout(Long userId) {
         jwtTool.logout(userId);
+    }
+
+    @Override
+    @Transactional
+    public void updateProfile(Long userId, String username) {
+        if (username == null || username.trim().isEmpty()) {
+            throw new BizException("用户名不能为空");
+        }
+        if (username.length() < 2 || username.length() > 32) {
+            throw new BizException("用户名长度需在2-32个字符之间");
+        }
+        // 检查重名
+        User existing = userMapper.selectOne(
+                new LambdaQueryWrapper<User>()
+                        .eq(User::getUsername, username)
+                        .ne(User::getId, userId));
+        if (existing != null) {
+            throw new BizException("用户名已被使用");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("用户不存在");
+        }
+        user.setUsername(username.trim());
+        userMapper.updateById(user);
     }
 
     // 重置 token：注册/登录时调用，自动签发全新的 access + refresh token

@@ -6,10 +6,14 @@ spring:
   application:
     name: m78-netdisk
   datasource:
-    url: jdbc:mysql://192.168.191.130:3306/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=30000
+    url: jdbc:mysql://192.168.191.130:3306/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=300000
     username: root
     password: ${DB_PASSWORD:942649}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      max-lifetime: 25000
+      idle-timeout: 20000
+      connection-test-query: SELECT 1
   redis:
     host: 192.168.191.130
     port: 6379
@@ -19,8 +23,8 @@ spring:
     time-zone: Asia/Shanghai
   servlet:
     multipart:
-      max-file-size: 100MB
-      max-request-size: 500MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
 netdisk:
   jwt:
@@ -30,13 +34,20 @@ netdisk:
     refresh-token-expiration: 2592000000     # 30天
   default-quota: 10737418240                 # 10GB
   storage:
-    type: local                               # local | oss — 切换存储后端
+    type: oss                               # local | oss — 切换存储后端
     local-path: ${user.home}/m78netdisk/storage
     oss:
       endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
       access-key-id: ${OSS_ACCESS_KEY_ID:LTAI5tRxr2ZBjDExX8KjkAk6}
       access-key-secret: ${OSS_ACCESS_KEY_SECRET:LzZ7FOIJA1q7LkMW71DGz0P9tJiUzo}
       bucket-name: ${OSS_BUCKET_NAME:dkd-nrzds}
+
+jodconverter:
+  local:
+    enabled: true
+    office-home: "C:/Program Files/LibreOffice"
+    port-numbers: 8100
+    max-tasks-per-process: 10
 
 mybatis-plus:
   configuration:

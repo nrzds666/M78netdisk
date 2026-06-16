@@ -14,6 +14,24 @@ public interface IFileService {
 
     IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer page, Integer size);
 
+    /**
+     * 带筛选条件的文件列表查询
+     * @param query 文件名搜索关键词
+     * @param mimePrefix MIME类型前缀过滤（如 image/, video/）
+     * @param dateFrom 开始日期 (yyyy-MM-dd)
+     * @param dateTo 结束日期 (yyyy-MM-dd)
+     */
+    IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer page, Integer size,
+                            String query, String mimePrefix, String dateFrom, String dateTo);
+
+    /**
+     * 带完整筛选条件的文件列表查询（支持多种 MIME 类型精确匹配）
+     */
+    IPage<ItemVO> listItems(Long ownerId, Long parentId, Integer page, Integer size,
+                            String query, String mimePrefix,
+                            java.util.List<String> mimeTypes, String excludePrefix,
+                            String dateFrom, String dateTo);
+
     ItemVO createFile(Long ownerId, Long parentId, String fileName, Long fileSize, String mimeType, String storageKey);
 
     ItemVO createFolder(Long ownerId, CreateFolderDTO dto);
@@ -34,11 +52,39 @@ public interface IFileService {
 
     void confirmChunk(Long ownerId, Long taskId, Integer chunkIndex, String storageKey, String etag, Integer size);
 
+    /**
+     * 上传单个分片
+     * @param ownerId   用户ID
+     * @param taskId    上传任务ID
+     * @param chunkIndex 分片序号（从0开始）
+     * @param file      分片文件
+     */
+    void uploadChunk(Long ownerId, Long taskId, Integer chunkIndex,
+                     org.springframework.web.multipart.MultipartFile file);
+
     void cancelUpload(Long ownerId, Long taskId);
+
+    void pauseUpload(Long ownerId, Long taskId);
+
 
     UploadTaskVO completeUpload(Long ownerId, Long taskId);
 
     UploadTaskVO getUploadStatus(Long ownerId, Long taskId);
+
+    /**
+     * 列出当前用户所有未完成的上传任务（uploading / merging）
+     */
+    List<UploadTaskVO> listUnfinishedTasks(Long ownerId);
+
+    /**
+     * 获取已完成的分片索引列表（用于断点续传）
+     */
+    List<Integer> getCompletedChunks(Long ownerId, Long taskId);
+
+    /**
+     * 删除上传任务及所有分片（存储 + DB）
+     */
+    void deleteUploadTask(Long ownerId, Long taskId);
 
     /**
      * 获取文件下载流信息

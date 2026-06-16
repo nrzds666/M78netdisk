@@ -3,12 +3,14 @@ package com.m78.netdisk.common;
 import com.m78.netdisk.common.storage.LocalStorageService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * RED test: LocalStorageService null/blank relativeKey validation.
  */
+@TestPropertySource(properties = "netdisk.storage.type=local")
 class LocalStorageServiceTest extends BaseTest {
 
     @Autowired

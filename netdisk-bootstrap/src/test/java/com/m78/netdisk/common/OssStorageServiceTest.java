@@ -10,6 +10,8 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * RED test: OssStorageService should validate null/blank relativeKey.
@@ -32,6 +34,26 @@ class OssStorageServiceTest {
         java.lang.reflect.Field bucketField = OssStorageService.class.getDeclaredField("bucketName");
         bucketField.setAccessible(true);
         bucketField.set(service, "test-bucket");
+
+        java.lang.reflect.Field endpointField = OssStorageService.class.getDeclaredField("endpoint");
+        endpointField.setAccessible(true);
+        endpointField.set(service, "oss-cn-test.aliyuncs.com");
+    }
+
+    @Test
+    void getPublicUrl_shouldReturnConstructedUrl() {
+        String url = service.getPublicUrl("avatars/1/abc.jpg");
+        assertEquals("https://test-bucket.oss-cn-test.aliyuncs.com/avatars/1/abc.jpg", url);
+    }
+
+    @Test
+    void getPublicUrl_withNullKey_shouldReturnNull() {
+        assertNull(service.getPublicUrl(null));
+    }
+
+    @Test
+    void getPublicUrl_withBlankKey_shouldReturnNull() {
+        assertNull(service.getPublicUrl(""));
     }
 
     @Test

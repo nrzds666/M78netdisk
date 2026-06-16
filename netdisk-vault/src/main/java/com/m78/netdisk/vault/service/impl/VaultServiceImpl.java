@@ -89,6 +89,9 @@ public class VaultServiceImpl implements IVaultService {
                 .setPasswordHash(passwordEncoder.encode(dto.getVaultPassword()));
         userVaultMapper.insert(vault);
 
+        // 设置成功后自动解锁
+        redisTemplate.opsForValue().set(VAULT_UNLOCK_KEY + userId, "1", UNLOCK_TTL_SECONDS, TimeUnit.SECONDS);
+
         log.info("保险箱创建成功: userId={}", userId);
     }
 
@@ -221,7 +224,7 @@ public class VaultServiceImpl implements IVaultService {
                 + "/" + originalName;
 
         try {
-            storageService.store(storageKey, file.getBytes());
+            storageService.store(storageKey, file.getInputStream());
         } catch (IOException e) {
             log.error("保险箱文件上传写入失败", e);
             throw new BizException("文件上传失败");

@@ -84,6 +84,8 @@ class VaultServiceImplTest {
         vaultService.setup(USER_ID, dto);
 
         verify(userVaultMapper).insert(any(UserVault.class));
+        // Setup should also auto-unlock in Redis
+        verify(valueOps).set("vault:unlock:" + USER_ID, "1", 3600, TimeUnit.SECONDS);
     }
 
     @Test
@@ -365,7 +367,7 @@ class VaultServiceImplTest {
         when(file.getOriginalFilename()).thenReturn("doc.pdf");
         when(file.getSize()).thenReturn(5000L);
         when(file.getContentType()).thenReturn("application/pdf");
-        when(file.getBytes()).thenReturn(new byte[5000]);
+        when(file.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(new byte[5000]));
 
         when(itemMapper.countByName(USER_ID, null, "doc.pdf")).thenReturn(0);
 
@@ -381,7 +383,7 @@ class VaultServiceImplTest {
         assertEquals("doc.pdf", vo.getName());
         assertFalse(vo.getIsDirectory());
         assertEquals(Long.valueOf(5000), vo.getSize());
-        verify(storageService).store(anyString(), eq(new byte[5000]));
+        verify(storageService).store(anyString(), any(java.io.InputStream.class));
     }
 
     @Test

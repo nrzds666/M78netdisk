@@ -19,6 +19,7 @@ public class ItemVO {
     private Boolean isDirectory;
     private Long size;
     private String mimeType;
+    private String storageKey;
     private String etag;
     private String thumbnailKey;
     private Boolean isFromShare;

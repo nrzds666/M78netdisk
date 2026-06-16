@@ -20,4 +20,9 @@ public interface IUserService {
     void updateAvatar(Long userId, String avatarUrl);
 
     void logout(Long userId);
+
+    /**
+     * 更新用户资料（用户名等）
+     */
+    void updateProfile(Long userId, String username);
 }

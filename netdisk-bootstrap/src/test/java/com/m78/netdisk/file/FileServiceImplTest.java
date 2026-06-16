@@ -1,8 +1,10 @@
 package com.m78.netdisk.file;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.m78.netdisk.common.exception.BizException;
 import com.m78.netdisk.common.storage.StorageService;
+import com.m78.netdisk.file.domain.dto.InitUploadDTO;
 import com.m78.netdisk.file.domain.dto.MoveItemsDTO;
 import com.m78.netdisk.file.domain.dto.RenameItemDTO;
 import com.m78.netdisk.file.domain.dto.SaveProgressDTO;
@@ -18,6 +20,8 @@ import com.m78.netdisk.file.mapper.MediaProgressMapper;
 import com.m78.netdisk.file.mapper.UploadChunkMapper;
 import com.m78.netdisk.file.mapper.UploadTaskMapper;
 import com.m78.netdisk.file.service.impl.FileServiceImpl;
+import com.m78.netdisk.file.service.impl.UploadMergeService;
+import com.m78.netdisk.user.domain.po.User;
 import com.m78.netdisk.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +36,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,6 +54,7 @@ class FileServiceImplTest {
     @Mock private UserMapper userMapper;
     @Mock private StorageService storageService;
     @Mock private MediaProgressMapper mediaProgressMapper;
+    @Mock private UploadMergeService uploadMergeService;
 
     @InjectMocks
     private FileServiceImpl fileService;
@@ -199,7 +206,7 @@ class FileServiceImplTest {
     // ========== Fix 6: completeUpload mergeChunks ==========
 
     @Test
-    void completeUpload_shouldMergeChunks() {
+    void completeUpload_shouldDelegateToMergeService() {
         Long taskId = 1L;
         UploadTask task = new UploadTask()
                 .setId(taskId)
@@ -214,27 +221,16 @@ class FileServiceImplTest {
                 .setMimeType("application/zip")
                 .setExpiresAt(LocalDateTime.now().plusHours(24));
 
-        List<UploadChunk> chunks = Arrays.asList(
-                new UploadChunk().setChunkIndex(0).setStorageKey("chunk/0"),
-                new UploadChunk().setChunkIndex(1).setStorageKey("chunk/1")
-        );
-
         when(uploadTaskMapper.selectById(taskId)).thenReturn(task);
-        when(uploadChunkMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(chunks);
-        when(itemMapper.insert(any(Item.class))).thenReturn(1);
-        when(userMapper.tryAddUsedBytes(anyLong(), anyLong())).thenReturn(1);
-
-        // Mock storage service for reading chunks
-        when(storageService.getInputStream(anyString()))
-                .thenReturn(new java.io.ByteArrayInputStream("test".getBytes()));
+        when(itemMapper.countByName(anyLong(), any(), anyString())).thenReturn(0);
 
         UploadTaskVO result = fileService.completeUpload(OWNER_ID, taskId);
 
         assertNotNull(result);
-        // Verify merge happened - storage was stored with merged data
-        verify(storageService).store(startsWith("merged/"), any(byte[].class));
-        // Version was created
-        verify(itemVersionMapper).insert(any(ItemVersion.class));
+        // 验证委托给 UploadMergeService
+        verify(uploadMergeService).performMerge(OWNER_ID, taskId);
+        // 验证 status 已改为 merging
+        assertEquals("merging", task.getStatus());
     }
 
     // ========== Fix 7: escapeLike helper ==========
@@ -353,5 +349,127 @@ class FileServiceImplTest {
         List<ItemVO> result = fileService.listRecentSaves(OWNER_ID, 3);
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void toItemVO_shouldIncludeStorageKey() throws Exception {
+        String testKey = "uploads/test/avatar.jpg";
+        Item item = new Item().setId(99L).setStorageKey(testKey);
+
+        java.lang.reflect.Method method = FileServiceImpl.class.getDeclaredMethod("toItemVO", Item.class);
+        method.setAccessible(true);
+        ItemVO vo = (ItemVO) method.invoke(fileService, item);
+
+        assertEquals(testKey, vo.getStorageKey());
+    }
+
+    // ========== Fix 5: uploadChunk status transition pending→uploading ==========
+
+    @Test
+    void uploadChunk_shouldTransitionStatusToUploading() throws Exception {
+        Long taskId = 1L;
+        UploadTask task = new UploadTask()
+                .setId(taskId)
+                .setOwnerId(OWNER_ID)
+                .setStatus("pending")
+                .setTotalChunks(10)
+                .setStoragePrefix("uploads/test");
+        when(uploadTaskMapper.selectById(taskId)).thenReturn(task);
+
+        org.springframework.web.multipart.MultipartFile mockFile =
+                mock(org.springframework.web.multipart.MultipartFile.class);
+        when(mockFile.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(new byte[100]));
+        when(mockFile.getSize()).thenReturn(100L);
+
+        fileService.uploadChunk(OWNER_ID, taskId, 0, mockFile);
+
+        // Verify status transition via LambdaUpdateWrapper
+        verify(uploadTaskMapper, atLeast(1)).update(
+                isNull(),
+                any(LambdaUpdateWrapper.class));
+    }
+
+    // ==================== OSS Storage Prefix ====================
+
+    @Test
+    void getFileExtension_shouldReturnLowercaseExt() {
+        assertEquals("mp4", FileServiceImpl.getFileExtension("demo.mp4"));
+        assertEquals("pdf", FileServiceImpl.getFileExtension("report.PDF"));
+        assertEquals("jpg", FileServiceImpl.getFileExtension("photo.JPG"));
+        assertEquals("", FileServiceImpl.getFileExtension("noext"));
+        assertEquals("", FileServiceImpl.getFileExtension(".hidden"));
+        assertEquals("gz", FileServiceImpl.getFileExtension("archive.tar.gz"));
+    }
+
+    @Test
+    void getFileCategory_shouldClassifyByExtension() {
+        assertEquals("video", FileServiceImpl.getFileCategory("mp4"));
+        assertEquals("audio", FileServiceImpl.getFileCategory("mp3"));
+        assertEquals("image", FileServiceImpl.getFileCategory("jpg"));
+        assertEquals("document", FileServiceImpl.getFileCategory("pdf"));
+        assertEquals("archive", FileServiceImpl.getFileCategory("zip"));
+        assertEquals("other", FileServiceImpl.getFileCategory("exe"));
+        assertEquals("other", FileServiceImpl.getFileCategory("unknown"));
+        assertEquals("other", FileServiceImpl.getFileCategory(""));
+    }
+
+    @Test
+    void initUpload_shouldCreateDatedStoragePrefix() {
+        InitUploadDTO dto = new InitUploadDTO();
+        dto.setFileName("test.mp4");
+        dto.setFileSize(10000L);
+        dto.setParentId(0L);
+
+        User user = new User()
+                .setId(OWNER_ID)
+                .setQuotaBytes(100_000_000L)
+                .setUsedBytes(10_000L);
+        when(userMapper.selectById(OWNER_ID)).thenReturn(user);
+        when(itemMapper.countByName(anyLong(), isNull(), eq("test.mp4"))).thenReturn(0);
+        // local storage: skip multipart upload
+        when(storageService.initiateMultipartUpload(anyString()))
+                .thenThrow(new UnsupportedOperationException("not supported"));
+
+        ArgumentCaptor<UploadTask> captor = ArgumentCaptor.forClass(UploadTask.class);
+
+        fileService.initUpload(OWNER_ID, dto);
+
+        verify(uploadTaskMapper).insert(captor.capture());
+        UploadTask saved = captor.getValue();
+
+        // storagePrefix = uploads/yyyy-MM-dd/video/{32-char hex}
+        assertNotNull(saved.getStoragePrefix());
+        assertTrue(saved.getStoragePrefix().matches(
+                "uploads/\\d{4}-\\d{2}-\\d{2}/video/[a-f0-9]{32}"),
+                "expected pattern uploads/{date}/video/{uuid32}, got: " + saved.getStoragePrefix());
+
+        // mergedKey = storagePrefix + "/" + fileName
+        assertEquals(saved.getStoragePrefix() + "/test.mp4", saved.getMergedKey());
+    }
+
+    @Test
+    void initUpload_shouldDeriveCorrectCategoryFromExtension() {
+        // audio
+        InitUploadDTO dto = new InitUploadDTO();
+        dto.setFileName("song.mp3");
+        dto.setFileSize(5000L);
+        dto.setParentId(0L);
+
+        User user = new User()
+                .setId(OWNER_ID)
+                .setQuotaBytes(100_000_000L)
+                .setUsedBytes(0L);
+        when(userMapper.selectById(OWNER_ID)).thenReturn(user);
+        when(itemMapper.countByName(anyLong(), isNull(), eq("song.mp3"))).thenReturn(0);
+        when(storageService.initiateMultipartUpload(anyString()))
+                .thenThrow(new UnsupportedOperationException("not supported"));
+
+        ArgumentCaptor<UploadTask> captor = ArgumentCaptor.forClass(UploadTask.class);
+
+        fileService.initUpload(OWNER_ID, dto);
+
+        verify(uploadTaskMapper).insert(captor.capture());
+        assertTrue(captor.getValue().getStoragePrefix().contains("/audio/"),
+                "expected /audio/ in prefix, got: " + captor.getValue().getStoragePrefix());
     }
 }

@@ -404,6 +404,16 @@ class FileSecurityTest {
         }
 
         @Test
+        @DisplayName("[RED] createFile 应接受含内嵌 .. 的文件名（如 2024..2025.pdf）")
+        void createFile_shouldAcceptNameContainingDotDot() {
+            when(itemMapper.countByName(anyLong(), isNull(), eq("2024..2025.pdf"))).thenReturn(0);
+            when(userMapper.tryAddUsedBytes(anyLong(), anyLong())).thenReturn(1);
+
+            assertDoesNotThrow(() ->
+                    fileService.createFile(OWNER_ID, null, "2024..2025.pdf", 100L, "text/plain", "key"));
+        }
+
+        @Test
         @DisplayName("createFile 应拒绝空文件名")
         void createFile_shouldRejectEmptyName() {
             assertThrows(BizException.class,
