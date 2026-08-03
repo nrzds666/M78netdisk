@@ -30,6 +30,12 @@
           </el-button-group>
         </el-col>
         <el-col :span="4" style="text-align:right">
+          <el-button :disabled="selectedIds.length === 0" @click="openMoveDialog" size="default">
+            移动到…
+          </el-button>
+          <el-button type="primary" :disabled="selectedIds.length === 0" @click="handleBatchDownload" size="default">
+            下载选中 ({{ selectedIds.length }})
+          </el-button>
           <el-button type="danger" :disabled="selectedIds.length === 0" @click="handleBatchDelete" size="default">
             删除选中 ({{ selectedIds.length }})
           </el-button>
@@ -106,7 +112,22 @@
             @dblclick="handleRowDoubleClick(item)"
           >
             <div class="grid-icon">
-              <el-icon :size="40" :color="item.isDirectory ? '#e6a23c' : getFileIconColor(item.mimeType)">
+              <!-- Thumbnail for images and videos -->
+              <el-image
+                v-if="!item.isDirectory && (item.mimeType?.startsWith('image') || item.mimeType?.startsWith('video')) && item.thumbnailKey"
+                :src="item.thumbnailKey"
+                fit="cover"
+                class="grid-thumb"
+              >
+                <template #error>
+                  <el-icon :size="40" :color="getFileIconColor(item.mimeType)">
+                    <Picture v-if="item.mimeType?.startsWith('image')" />
+                    <VideoCamera v-else-if="item.mimeType?.startsWith('video')" />
+                  </el-icon>
+                </template>
+              </el-image>
+              <!-- Fallback icons for non-media or when thumbnail unavailable -->
+              <el-icon v-else :size="40" :color="item.isDirectory ? '#e6a23c' : getFileIconColor(item.mimeType)">
                 <Folder v-if="item.isDirectory" />
                 <Picture v-else-if="item.mimeType?.startsWith('image')" />
                 <VideoCamera v-else-if="item.mimeType?.startsWith('video')" />
@@ -211,7 +232,7 @@
 
         <!-- Video -->
         <div v-else-if="previewType === 'video'" class="preview-center">
-          <video :src="previewUrl" controls style="max-width:100%;max-height:70vh" />
+          <video :src="previewUrl" :poster="posterUrl" controls style="max-width:80%;max-height:75vh;min-height:60vh;display:block;background:#000;margin:0 auto" />
         </div>
 
         <!-- Audio -->
@@ -309,6 +330,33 @@
         </template>
       </template>
     </el-dialog>
+    <!-- Move Dialog -->
+    <el-dialog v-model="moveDialogVisible" title="移动到" width="480px">
+      <div style="margin-bottom:12px;color:#909399">
+        当前路径: /{{ moveTargetPath.join('/') || '' }}
+      </div>
+      <el-table :data="moveFolders" v-loading="moveLoading" max-height="320" highlight-current-row
+        @row-dblclick="enterMoveFolder">
+        <el-table-column label="">
+          <template #default="{ row }">
+            <el-icon color="#e6a23c"><Folder /></el-icon>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="文件夹" />
+      </el-table>
+      <div style="margin-top:12px">
+        <el-button text @click="goUpMoveFolder" :disabled="moveTargetFolderId === null">
+          <el-icon><ArrowLeft /></el-icon> 返回上级
+        </el-button>
+        <el-button text type="primary" @click="moveToRoot" :disabled="moveTargetFolderId === null">
+          返回根目录
+        </el-button>
+      </div>
+      <template #footer>
+        <el-button @click="moveDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmMove" :disabled="selectedIds.length === 0">移动到此</el-button>
+      </template>
+    </el-dialog>
     <!-- Hidden folder upload input -->
     <input
       ref="folderInputRef"
@@ -322,18 +370,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useFileStore } from '@/stores/file'
 import { useUploadStore } from '@/stores/upload'
 import { getToken } from '@/utils/auth'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import {
   Search, List, Grid, Folder, FolderOpened, FolderAdd,
   Document, Picture, VideoCamera, Headset, Reading,
   Download, Delete, Share, Plus, ArrowLeft
 } from '@element-plus/icons-vue'
-import { listItems, createFolder, moveToTrash, upload as uploadApi, download as downloadApi, chunkedUpload } from '@/api/file'
+import { listItems, createFolder, moveToTrash, moveItems, batchDownloadUrl, upload as uploadApi, download as downloadApi, chunkedUpload } from '@/api/file'
 import { createShare } from '@/api/share'
 import uploadIcon from '@/assets/upload-icon.png'
 import { saveUploadFile, removeUploadFile, updateTaskId } from '@/utils/indexeddb'
@@ -362,6 +410,12 @@ const newFolderName = ref('')
 const selectedFiles = ref([])
 const folderInputRef = ref(null)
 const uploadFolderCount = ref(0)
+const moveDialogVisible = ref(false)
+const moveTargetFolderId = ref(null)
+const moveTargetPath = ref([])
+const moveFolderStack = ref([])  // 栈: [{id, name}]
+const moveFolders = ref([])
+const moveLoading = ref(false)
 const folderUploadTotal = ref(0)
 
 const currentFolderId = computed(() => fileStore.currentFolderId)
@@ -370,6 +424,10 @@ const currentFolderId = computed(() => fileStore.currentFolderId)
 const showPreviewDialog = ref(false)
 const previewItem = ref(null)
 const previewUrl = ref('')
+const posterUrl = computed(() => {
+  if (!previewItem.value) return ''
+  return `/api/files/preview/${previewItem.value.id}/poster?token=${getToken()}`
+})
 const previewType = ref('')
 const previewLoading = ref(false)
 
@@ -603,6 +661,67 @@ async function handleBatchDelete() {
   }
 }
 
+// ─── 批量移动 ───
+async function openMoveDialog() {
+  moveDialogVisible.value = true
+  moveTargetFolderId.value = null
+  moveTargetPath.value = []
+  moveFolderStack.value = []
+  await loadMoveFolders(null)
+}
+
+async function loadMoveFolders(parentId) {
+  moveLoading.value = true
+  try {
+    const res = await listItems(parentId, 1, 200, {})
+    moveFolders.value = (res.data?.records || []).filter(f => f.isDirectory)
+  } finally {
+    moveLoading.value = false
+  }
+}
+
+async function enterMoveFolder(row) {
+  moveFolderStack.value.push({ id: moveTargetFolderId.value, name: row.name })
+  moveTargetFolderId.value = row.id
+  moveTargetPath.value.push(row.name)
+  await loadMoveFolders(row.id)
+}
+
+async function goUpMoveFolder() {
+  if (moveFolderStack.value.length === 0) return
+  const prev = moveFolderStack.value.pop()
+  moveTargetFolderId.value = prev.id
+  moveTargetPath.value.pop()
+  await loadMoveFolders(moveTargetFolderId.value)
+}
+
+async function moveToRoot() {
+  moveTargetFolderId.value = null
+  moveTargetPath.value = []
+  moveFolderStack.value = []
+  await loadMoveFolders(null)
+}
+
+async function confirmMove() {
+  if (selectedIds.value.length === 0) return
+  try {
+    await moveItems(selectedIds.value, moveTargetFolderId.value)
+    ElMessage.success('移动成功')
+    moveDialogVisible.value = false
+    selectedIds.value = []
+    loadFiles()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.msg || e.message || '移动失败')
+  }
+}
+
+// ─── 批量下载 ───
+function handleBatchDownload() {
+  if (selectedIds.value.length === 0) return
+  window.open(batchDownloadUrl(selectedIds.value), '_blank')
+  ElMessage.success('下载已开始')
+}
+
 function onSearch() {
   page.value = 1
   loadFiles()
@@ -830,6 +949,20 @@ async function confirmUpload() {
   selectedFiles.value = []
   uploadRef.value?.clearFiles()
 
+  // 提示用户前往传输页面查看上传进度
+  ElNotification({
+    title: '文件已加入上传队列',
+    message: h('div', {}, [
+      '正在后台上传，',
+      h('a', {
+        style: 'color:#409eff;cursor:pointer;text-decoration:underline',
+        onClick: () => { router.push('/transfer') }
+      }, '前往传输页面查看进度')
+    ]),
+    type: 'info',
+    duration: 5000
+  })
+
   // 启动排队上传
   if (!uploadStore.beginProcessing()) return // 已有在处理中的排队
   let successCount = 0
@@ -841,45 +974,58 @@ async function confirmUpload() {
     const file = idx >= 0 && idx < files.length ? files[idx] : item.file
     try {
       const CHUNK_THRESHOLD = 10 * 1024 * 1024
-      if (file.size > CHUNK_THRESHOLD) {
-        item.progress = item.initialProgress || 1
-        let targetProgress = item.progress
-        let stepTimer = null
-
-        function startStepper() {
-          if (stepTimer) return
-          stepTimer = setInterval(() => {
-            const gap = targetProgress - item.progress
-            if (gap <= 0) {
-              clearInterval(stepTimer)
-              stepTimer = null
-              return
-            }
-            const step = Math.min(3, gap)
-            item.progress += step
-          }, 400)
+      if (item.skipChunks?.length) {
+        // 断点续传分支：复用已有 taskId，跳过已上传分片
+        item.progress = item.initialProgress || 0
+        item.displayProgress = item.initialProgress || 0
+        item.uploadPhase = 'preparing'
+        const ac = new AbortController()
+        item.abortController = ac
+        const targetParentId = item.parentId != null ? item.parentId : currentFolderId.value
+        await chunkedUpload(file, targetParentId,
+          (pct) => { /* progress driven by onBatchComplete */ },
+          item.name, item.taskId, item.skipChunks,
+          (tid) => { item.taskId = tid; updateTaskId(item.id, tid) },
+          ac.signal,
+          ({ batchDuration, batchBytes, totalPercent }) => {
+            if (item.uploadPhase === 'preparing') item.uploadPhase = 'uploading'
+            const batchSpeed = batchDuration > 0 ? (batchBytes / (batchDuration / 1000)) : 0
+            uploadStore.startSmoothProgress(item.id, batchDuration, totalPercent, batchSpeed)
+          })
+        uploadStore.setMergingPhase(item.id)
+        uploadStore.completeMerge(item.id)
+      } else if (file.size > CHUNK_THRESHOLD) {
+        // 仅对新任务重置进度，已恢复的断点续传保留原有进度
+        if (!item.taskId || !item.skipChunks?.length) {
+          item.displayProgress = 0
         }
-
+        item.uploadPhase = 'preparing'
         const abortController = new AbortController()
         item.abortController = abortController
-        try {
-          await chunkedUpload(file, currentFolderId.value, (percent) => {
-            targetProgress = percent
-            startStepper()
-          }, undefined, item.taskId || undefined, item.skipChunks?.length ? item.skipChunks : undefined, (taskId) => {
-            item.taskId = taskId
-            updateTaskId(item.id, taskId)
-          }, abortController.signal)
-        } finally {
-          if (stepTimer) {
-            clearInterval(stepTimer)
-            stepTimer = null
+        const targetParentId = item.parentId != null ? item.parentId : currentFolderId.value
+        await chunkedUpload(file, targetParentId, (percent) => {
+          // onProgress: 不直接驱动进度条，由 onBatchComplete 控制
+        }, undefined, item.taskId || undefined, item.skipChunks?.length ? item.skipChunks : undefined, (taskId) => {
+          item.taskId = taskId
+          updateTaskId(item.id, taskId)
+        }, abortController.signal,
+        // onBatchComplete: 每批分片上传完成后回调
+        ({ batchDuration, batchBytes, totalPercent }) => {
+          if (item.uploadPhase === 'preparing') {
+            item.uploadPhase = 'uploading'
           }
-        }
-      } else {
-        await uploadApi(file, currentFolderId.value, (percent) => {
-          uploadStore.updateProgress(item.id, percent)
+          const batchSpeed = batchDuration > 0 ? (batchBytes / (batchDuration / 1000)) : 0
+          uploadStore.startSmoothProgress(item.id, batchDuration, totalPercent, batchSpeed)
         })
+        uploadStore.setMergingPhase(item.id)
+        uploadStore.completeMerge(item.id)
+      } else {
+        const targetParentId = item.parentId != null ? item.parentId : currentFolderId.value
+        const abortController = new AbortController()
+        item.abortController = abortController
+        await uploadApi(file, targetParentId, (percent) => {
+          uploadStore.updateProgress(item.id, percent)
+        }, undefined, undefined, abortController.signal)
       }
       uploadStore.markDone(item.id)
       successCount++
@@ -1019,6 +1165,13 @@ watch(() => route.params.id, () => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.grid-thumb {
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  display: block;
 }
 
 .grid-name {

@@ -181,7 +181,7 @@ async function handleAccess() {
       loadItems()
     }
   } catch (e) {
-    accessError.value = e.response?.data?.msg || '分享链接无效或已过期'
+    accessError.value = e.response?.data?.msg || e.message || '分享链接无效或已过期'
   } finally {
     accessLoading.value = false
   }

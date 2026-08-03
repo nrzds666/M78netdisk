@@ -86,11 +86,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 import { getToday } from '@/api/calendar'
 import { recentItems, recentSaves } from '@/api/file'
 import { Folder, Document, Download } from '@element-plus/icons-vue'
 
 const router = useRouter()
+const userStore = useUserStore()
 
 const recentFiles = ref([])
 const recentSavesList = ref([])
@@ -113,6 +115,12 @@ function todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/** 用户维度的 localStorage key */
+function fortuneKey() {
+  const uid = userStore.userInfo?.id || 'anonymous'
+  return `m78_fortune_${uid}`
+}
+
 async function loadData() {
   try {
     const [filesRes, savesRes] = await Promise.all([
@@ -127,7 +135,7 @@ async function loadData() {
 }
 
 function loadFortune() {
-  const saved = localStorage.getItem('m78_fortune')
+  const saved = localStorage.getItem(fortuneKey())
   if (saved) {
     try {
       const { date, data } = JSON.parse(saved)
@@ -149,7 +157,7 @@ async function checkFortune() {
     calendarData.value = res.data || {}
     showFortune.value = false
     // 保存到 localStorage，当天不再显示按钮
-    localStorage.setItem('m78_fortune', JSON.stringify({
+    localStorage.setItem(fortuneKey(), JSON.stringify({
       date: todayKey(),
       data: calendarData.value
     }))

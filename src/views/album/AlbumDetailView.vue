@@ -47,9 +47,8 @@
                 :src="item.thumbnailKey || getPreviewUrl(item.itemId)"
                 fit="cover"
                 class="detail-item-thumb"
-                :preview-src-list="imageUrls"
-                :initial-index="imageIndex(item.itemId)"
-                hide-on-click-modal
+                style="cursor:pointer"
+                @click.stop="openPreview(item)"
               >
                 <template #error>
                   <div class="detail-item-placeholder">
@@ -231,6 +230,13 @@
       </div>
     </Transition>
   </div>
+
+  <!-- Preview Dialog -->
+  <el-dialog v-model="showPreviewDialog" title="图片预览" width="70%" :close-on-click-modal="false" destroy-on-close>
+    <div style="display:flex;justify-content:center;align-items:center;min-height:200px">
+      <el-image :src="previewUrl" fit="contain" style="max-width:100%;max-height:70vh" :preview-src-list="[previewUrl]" />
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -261,11 +267,20 @@ function getPreviewUrl(itemId) {
 const imageUrls = computed(() => {
   return items.value
     .filter(i => i.mimeType?.startsWith('image/'))
-    .map(i => i.thumbnailKey || getPreviewUrl(i.itemId))
+    .map(i => getPreviewUrl(i.itemId))
 })
 
 function imageIndex(itemId) {
   return imageUrls.value.findIndex((_, idx) => items.value[idx]?.itemId === itemId)
+}
+
+// ─── Preview Dialog ───
+const showPreviewDialog = ref(false)
+const previewUrl = ref('')
+
+function openPreview(item) {
+  previewUrl.value = getPreviewUrl(item.itemId)
+  showPreviewDialog.value = true
 }
 
 // ─── Load ───
@@ -359,7 +374,7 @@ const slideshowImages = computed(() => {
   return items.value.filter(i => i.mimeType?.startsWith('image/'))
     .map(i => ({
       ...i,
-      thumbnailKey: i.thumbnailKey || getPreviewUrl(i.itemId)
+      thumbnailKey: getPreviewUrl(i.itemId)
     }))
 })
 
@@ -618,6 +633,7 @@ onMounted(loadAlbum)
   opacity: 0;
   transition: opacity 0.2s;
   line-height: 1.5;
+  pointer-events: none;
 }
 
 .detail-item-img:hover .item-info-overlay {

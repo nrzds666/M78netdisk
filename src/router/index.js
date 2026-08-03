@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { getToken } from '@/utils/auth'
+import axios from 'axios'
+import { getToken, clearAuth } from '@/utils/auth'
 
 const routes = [
   {
@@ -73,6 +74,26 @@ const routes = [
         path: 'vault',
         name: 'Vault',
         component: () => import('@/views/vault/VaultView.vue')
+      },
+      {
+        path: 'admin',
+        name: 'AdminDashboard',
+        component: () => import('@/views/admin/AdminDashboardView.vue')
+      },
+      {
+        path: 'admin/users',
+        name: 'AdminUsers',
+        component: () => import('@/views/admin/AdminUsersView.vue')
+      },
+      {
+        path: 'admin/nodes',
+        name: 'AdminNodes',
+        component: () => import('@/views/admin/AdminNodesView.vue')
+      },
+      {
+        path: 'admin/logs',
+        name: 'AdminLogs',
+        component: () => import('@/views/admin/AdminLogsView.vue')
       }
     ]
   }
@@ -83,17 +104,41 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
-  // Allow public share access without auth
+let tokenValidated = false
+
+router.beforeEach(async (to, from, next) => {
+  // 公开访问页面不校验
   if (to.name === 'ShareAccess' || to.name === 'ShareAccessFolder' || to.name === 'AlbumShareAccess') {
     next()
     return
   }
-  if (to.name !== 'Login' && !getToken()) {
-    next({ name: 'Login' })
-  } else {
+  // 登录页直接放行
+  if (to.name === 'Login') {
     next()
+    return
   }
+
+  const token = getToken()
+  if (!token) {
+    next({ name: 'Login' })
+    return
+  }
+
+  // 首次加载时主动向后端验 token，失败直接跳登录
+  if (!tokenValidated) {
+    tokenValidated = true
+    try {
+      await axios.get((import.meta.env.VITE_APP_BASE_API || '') + '/api/files/list?page=1&size=1', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+    } catch {
+      clearAuth()
+      next({ name: 'Login' })
+      return
+    }
+  }
+
+  next()
 })
 
 export default router

@@ -17,6 +17,7 @@ export const useUserStore = defineStore('user', {
       const res = await apiLogin(username, password, captchaKey, captchaCode)
       this.token = res.data.accessToken
       localStorage.setItem('m78_token', this.token)
+      localStorage.setItem('m78_refresh_token', res.data.refreshToken)
       await this.fetchUserInfo()
     },
 
@@ -24,6 +25,7 @@ export const useUserStore = defineStore('user', {
       const res = await apiRegister(username, password, email, captchaKey, captchaCode)
       this.token = res.data.accessToken
       localStorage.setItem('m78_token', this.token)
+      localStorage.setItem('m78_refresh_token', res.data.refreshToken)
       await this.fetchUserInfo()
     },
 

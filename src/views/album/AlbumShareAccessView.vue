@@ -35,7 +35,7 @@
               <div class="share-item-img">
                 <el-image
                   v-if="item.mimeType?.startsWith('image')"
-                  :src="item.thumbnailKey || getSharePreviewUrl(item.itemId)"
+                  :src="getSharePreviewUrl(item.itemId)"
                   fit="cover"
                   class="share-item-thumb"
                   :preview-src-list="imageUrls"
@@ -85,7 +85,7 @@ const imageUrls = computed(() => {
   if (!album.value?.items) return []
   return album.value.items
     .filter(i => i.mimeType?.startsWith('image/'))
-    .map(i => i.thumbnailKey || getSharePreviewUrl(i.itemId))
+    .map(i => getSharePreviewUrl(i.itemId))
 })
 
 function imageIndex(itemId) {

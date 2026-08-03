@@ -2,173 +2,121 @@
   <div class="transfer-page">
     <el-card shadow="never" class="transfer-card">
       <el-tabs v-model="activeTab">
-        <!-- Tab 1: Uploading (实时) -->
         <el-tab-pane label="上传中" name="uploading">
-          <!-- Unfinished tasks (resume) -->
-          <template v-if="unfinishedTasks.length > 0">
-            <div class="section-label">未完成的上传</div>
-            <div
-              v-for="task in unfinishedTasks"
-              :key="'resume-' + task.taskId"
-              class="upload-item resume-item"
-            >
-              <div class="upload-item-info">
-                <span class="upload-item-name" :title="task.fileName">{{ task.fileName }}</span>
-                <span class="upload-item-size">{{ formatSize(task.fileSize) }}</span>
-              </div>
-              <el-progress
-                :percentage="task.totalChunks > 0 ? Math.round(task.receivedChunks / task.totalChunks * 100) : 0"
-                :stroke-width="8"
-                style="width:100%"
-              />
-              <div style="margin-top:4px;display:flex;justify-content:flex-end">
-                <el-button size="small" type="primary" @click="resumeTask(task)">继续上传</el-button>
-                <el-button size="small" type="danger" @click="deleteUnfinished(task)">删除</el-button>
-              </div>
+          <template v-if="uploadStore.queue.length > 0">
+            <!-- toolbar -->
+            <div class="toolbar">
+              <span class="toolbar-hint">
+                正在上传 {{ uploadingCount }} 个，等待 {{ pendingCount }} 个
+                <template v-if="pausedCount">，已暂停 {{ pausedCount }} 个</template>
+              </span>
+              <span style="flex:1"></span>
+              <el-button size="small" :disabled="uploadingCount === 0" @click="batchPause">全部暂停</el-button>
+              <el-button size="small" type="success" plain :disabled="pausedCount === 0" @click="batchResume">全部继续</el-button>
+              <el-button size="small" type="danger" plain :disabled="uploadStore.queue.length === 0" @click="batchCancel">全部取消</el-button>
             </div>
-            <el-divider />
+
+            <el-table :data="uploadStore.queue" stripe row-key="id">
+              <el-table-column label="文件名" min-width="280" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <div class="name-cell" @mouseenter="hoverRowId = row.id" @mouseleave="hoverRowId = null">
+                    <span class="item-name" :class="{ 'is-folder': row.isFolder }">
+                      {{ row.isFolder ? '📁 ' : '' }}{{ row.name }}
+                    </span>
+                    <span class="hover-actions" v-show="hoverRowId === row.id && row.status !== 'done'" @click.stop>
+                      <template v-if="row.status === 'uploading'">
+                        <el-button link size="small" @click="pauseItem(row)">⏸暂停</el-button>
+                        <el-button link size="small" type="danger" @click="cancelItem(row)">✕取消</el-button>
+                      </template>
+                      <template v-else-if="row.status === 'paused'">
+                        <el-button link size="small" @click="resumeItem(row)">▶继续</el-button>
+                        <el-button link size="small" type="danger" @click="cancelItem(row)">✕取消</el-button>
+                      </template>
+                      <template v-else-if="row.status === 'pending'">
+                        <el-button link size="small" type="danger" @click="cancelItem(row)">✕取消</el-button>
+                      </template>
+                      <template v-else-if="row.status === 'failed'">
+                        <el-button link size="small" @click="uploadStore.removeItem(row.id)">删除</el-button>
+                      </template>
+                    </span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="大小" width="180" align="right">
+                <template #default="{ row }">
+                  <template v-if="row.isFolder">
+                    {{ row.completedFiles || 0 }}/{{ row.fileCount || 0 }}项 · {{ formatSize(row.size) }}
+                  </template>
+                  <template v-else>
+                    {{ formatUploadedSize(row) }}/{{ formatSize(row.size) }}
+                  </template>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="260">
+                <template #default="{ row }">
+                  <template v-if="row.status === 'uploading'">
+                    <div class="progress-label">{{ row.displaySpeed || row.speed || '' }}</div>
+                    <el-progress :percentage="Math.round(row.displayProgress != null ? row.displayProgress : row.progress)" :stroke-width="6" :show-text="false" />
+                    <div class="progress-pct">{{ Math.round(row.displayProgress != null ? row.displayProgress : row.progress) }}%</div>
+                  </template>
+                  <template v-else-if="row.status === 'paused'">
+                    <div class="progress-label">已暂停</div>
+                    <el-progress :percentage="Math.round(row.displayProgress != null ? row.displayProgress : row.progress)" :stroke-width="6" :show-text="false" color="#e6a23c" />
+                    <div class="progress-pct">{{ Math.round(row.displayProgress != null ? row.displayProgress : row.progress) }}%</div>
+                  </template>
+                  <template v-else-if="row.status === 'pending'">
+                    <div class="progress-label">等待中</div>
+                    <el-progress :percentage="Math.round(row.displayProgress != null ? row.displayProgress : row.progress)" :stroke-width="6" :show-text="false" color="#c0c4cc" />
+                    <div class="progress-pct">{{ Math.round(row.displayProgress != null ? row.displayProgress : row.progress) }}%</div>
+                  </template>
+                  <template v-else-if="row.status === 'failed'">
+                    <div class="progress-label" style="color:#f56c6c">{{ row.error || '失败' }}</div>
+                    <el-progress :percentage="Math.round(row.displayProgress != null ? row.displayProgress : row.progress)" :stroke-width="6" :show-text="false" color="#f56c6c" />
+                    <div class="progress-pct">{{ Math.round(row.displayProgress != null ? row.displayProgress : row.progress) }}%</div>
+                  </template>
+                  <template v-else-if="row.status === 'done'">
+                    <div class="progress-label" style="color:#67c23a">已完成</div>
+                    <el-progress :percentage="100" :stroke-width="6" :show-text="false" color="#67c23a" />
+                    <div class="progress-pct">100%</div>
+                  </template>
+                </template>
+              </el-table-column>
+            </el-table>
           </template>
-
-          <div v-if="uploadStore.uploadingItems.length > 0" class="upload-summary">
-            正在上传 {{ uploadStore.uploadingItems.length }} 个文件...
-          </div>
-
-          <template v-if="uploadStore.uploadingItems.length > 0">
-            <div
-              v-for="item in uploadStore.uploadingItems"
-              :key="item.id"
-              class="upload-item"
-            >
-              <template v-if="item.isFolder">
-                <div class="upload-item-info">
-                  <span class="upload-item-name folder-icon" :title="item.name">📁 {{ item.name }}</span>
-                  <span class="upload-item-speed" v-if="item.speed">{{ item.speed }}</span>
-                  <span class="upload-item-size">{{ item.completedFiles }}/{{ item.fileCount }} · {{ formatSize(item.size) }}</span>
-                </div>
-                <el-progress
-                  :percentage="item.progress"
-                  :status="item.progress === 100 ? 'success' : undefined"
-                  :stroke-width="8"
-                  style="width:100%"
-                  :class="{ 'progress-active': item.status === 'uploading' }"
-                />
-                <div style="margin-top:4px;display:flex;justify-content:flex-end">
-                  <el-button size="small" @click="pauseItem(item)">暂停</el-button>
-                </div>
-              </template>
-              <template v-else>
-                <div class="upload-item-info">
-                  <span class="upload-item-name" :title="item.name">{{ item.name }}</span>
-                  <span class="upload-item-speed" v-if="item.speed">{{ item.speed }}</span>
-                  <span class="upload-item-size">{{ formatSize(item.size) }}</span>
-                </div>
-                <el-progress
-                  :percentage="item.progress"
-                  :status="item.progress === 100 ? 'success' : undefined"
-                  :stroke-width="8"
-                  style="width:100%"
-                  :class="{ 'progress-active': item.status === 'uploading' }"
-                />
-                <div style="margin-top:4px;display:flex;justify-content:flex-end">
-                  <el-button size="small" @click="pauseItem(item)">暂停</el-button>
-                </div>
-              </template>
-            </div>
-          </template>
-
-          <!-- Pending items -->
-          <template v-if="uploadStore.pendingItems.length > 0">
-            <el-divider v-if="uploadStore.uploadingItems.length > 0" />
-            <div class="upload-summary" style="color:#909399">等待上传 {{ uploadStore.pendingItems.length }} 个文件</div>
-            <div
-              v-for="item in uploadStore.pendingItems"
-              :key="item.id"
-              class="upload-item"
-            >
-              <div class="upload-item-info">
-                <span class="upload-item-name" :title="item.name">{{ item.name }}</span>
-                <span class="upload-item-size">{{ formatSize(item.size) }}</span>
-                <el-tag size="small" type="info">等待中</el-tag>
-              </div>
-              <div style="margin-top:4px;display:flex;justify-content:flex-end">
-                <el-button size="small" type="danger" plain @click="cancelPending(item)">取消</el-button>
-              </div>
-            </div>
-          </template>
-
-          <!-- Failed items -->
-          <template v-if="uploadStore.failedItems.length > 0">
-            <el-divider />
-            <div class="section-label">上传失败</div>
-            <div
-              v-for="item in uploadStore.failedItems"
-              :key="item.id"
-              class="upload-item upload-item-failed"
-            >
-              <div class="upload-item-info">
-                <span class="upload-item-name">{{ item.name }}</span>
-                <el-tag type="danger" size="small">{{ item.error || '失败' }}</el-tag>
-              </div>
-              <div v-if="item.isFolder && item.failedFiles?.length" class="failed-files-list">
-                <div v-for="(ff, fi) in item.failedFiles.slice(0, 10)" :key="fi" class="failed-file-item">{{ ff }}</div>
-                <div v-if="item.failedFiles.length > 10" class="failed-file-item">... 还有 {{ item.failedFiles.length - 10 }} 个文件</div>
-              </div>
-              <div style="margin-top:4px;display:flex;justify-content:flex-end">
-                <el-button size="small" @click="uploadStore.removeItem(item.id)">删除</el-button>
-              </div>
-            </div>
-          </template>
-
-          <el-empty v-if="uploadStore.totalCount === 0 && unfinishedTasks.length === 0" description="暂无上传任务" />
+          <el-empty v-else description="暂无上传任务" />
         </el-tab-pane>
 
-        <!-- Tab 2: Completed (已完成) -->
         <el-tab-pane label="已完成" name="completed">
           <template v-if="recentUploads.length > 0">
-            <el-table :data="recentUploads" style="width:100%" stripe>
-              <el-table-column label="文件名" min-width="250">
-                <template #default="{ row }">
-                  <span class="file-name-text">{{ row.name }}</span>
-                </template>
+            <el-table :data="recentUploads" stripe>
+              <el-table-column label="文件名" min-width="250" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.name }}</template>
               </el-table-column>
               <el-table-column label="大小" width="100" align="right">
-                <template #default="{ row }">
-                  {{ formatSize(row.size) }}
-                </template>
+                <template #default="{ row }">{{ formatSize(row.size) }}</template>
               </el-table-column>
               <el-table-column label="上传时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.createdAt || row.updatedAt) }}
-                </template>
+                <template #default="{ row }">{{ formatDateTime(row.createdAt || row.updatedAt) }}</template>
               </el-table-column>
               <el-table-column label="状态" width="100">
-                <template #default>
-                  <el-tag type="success" size="small">已完成</el-tag>
-                </template>
+                <template #default><el-tag type="success" size="small">已完成</el-tag></template>
               </el-table-column>
             </el-table>
           </template>
           <el-empty v-else description="暂无上传记录" />
         </el-tab-pane>
 
-        <!-- Tab 3: Downloads -->
         <el-tab-pane label="下载" name="download">
           <template v-if="recentDownloads.length > 0">
-            <el-table :data="recentDownloads" style="width:100%" stripe>
-              <el-table-column label="文件名" min-width="250">
-                <template #default="{ row }">
-                  <span class="file-name-text">{{ row.name }}</span>
-                </template>
+            <el-table :data="recentDownloads" stripe>
+              <el-table-column label="文件名" min-width="250" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.name }}</template>
               </el-table-column>
               <el-table-column label="大小" width="100" align="right">
-                <template #default="{ row }">
-                  {{ formatSize(row.size) }}
-                </template>
+                <template #default="{ row }">{{ formatSize(row.size) }}</template>
               </el-table-column>
               <el-table-column label="下载时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.createdAt || row.updatedAt) }}
-                </template>
+                <template #default="{ row }">{{ formatDateTime(row.createdAt || row.updatedAt) }}</template>
               </el-table-column>
             </el-table>
           </template>
@@ -180,130 +128,137 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUploadStore } from '@/stores/upload'
-import { recentItems, recentSaves, listUnfinishedTasks as listTasks, getCompletedChunks, deleteUploadTask, uploadPause, chunkedUpload, upload as uploadApi } from '@/api/file'
-import { getUploadFileByTaskId, getAllUploadFiles, updateTaskId } from '@/utils/indexeddb'
+import { recentItems, recentSaves, getCompletedChunks, uploadPause, uploadCancel, chunkedUpload, estimateTotalChunks, upload as uploadApi } from '@/api/file'
+import { getAllUploadFiles, updateTaskId } from '@/utils/indexeddb'
 
 const uploadStore = useUploadStore()
 const activeTab = ref('uploading')
-
+const hoverRowId = ref(null)
 const recentUploads = ref([])
 const recentDownloads = ref([])
-const unfinishedTasks = ref([])
+
+const uploadingCount = computed(() => uploadStore.uploadingItems.length)
+const pendingCount = computed(() => uploadStore.pendingItems.length)
+const pausedCount = computed(() => uploadStore.queue.filter(i => i.status === 'paused').length)
 
 function formatSize(bytes) {
   if (!bytes && bytes !== 0) return '-'
   const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
+  let i = 0, size = bytes
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
   return size.toFixed(1) + ' ' + units[i]
+}
+
+function formatUploadedSize(item) {
+  if (!item.size) return '0'
+  const pct = (item.displayProgress != null ? item.displayProgress : item.progress) / 100
+  return formatSize(Math.round(item.size * pct))
 }
 
 function formatDateTime(t) {
   if (!t) return ''
   const d = new Date(t)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const pad = n => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
 }
 
-async function loadUnfinishedTasks() {
-  try {
-    const res = await listTasks()
-    const allTasks = res.data || []
-    const activeTaskIds = uploadStore.queue
-      .filter(i => i.taskId != null && (i.status === 'uploading' || i.status === 'pending'))
-      .map(i => i.taskId)
-    unfinishedTasks.value = allTasks.filter(t => !activeTaskIds.includes(t.taskId))
-  } catch {
-    unfinishedTasks.value = []
+async function pauseItem(item) {
+  // Step 1: 本地中止 HTTP 请求（同步，不会失败）
+  if (item.abortController) item.abortController.abort()
+
+  // Step 2: 通知后端（best-effort，失败不影响本地暂停）
+  let backendPaused = false
+  if (item.taskId) {
+    try {
+      await uploadPause(item.taskId)
+      backendPaused = true
+    } catch {
+      // 后端通知失败，但本地已中止，仍然标记暂停
+      console.warn('后端暂停通知失败: taskId=' + item.taskId)
+    }
+  }
+
+  // Step 3: 无论后端是否成功，本地状态必须更新
+  item.status = 'paused'
+  item.displaySpeed = ''
+  uploadStore.stopSmoothTimers(item.id)
+  ElMessage.success(backendPaused ? '已暂停' : '已暂停（后台同步中）')
+}
+
+async function resumeItem(item) {
+  // 恢复前先从服务器拉取已完成的分片列表，以便断点续传复用已有 taskId
+  if (item.taskId) {
+    try {
+      const cr = await getCompletedChunks(item.taskId)
+      item.skipChunks = cr.data || []
+      // 将已上传分片个数转为百分比（需用与 chunkedUpload 相同的 totalChunks 估算公式）
+      const count = item.skipChunks.length
+      const estTotal = estimateTotalChunks(item.size)
+      item.initialProgress = count > 0 ? Math.round((count / estTotal) * 100) : 0
+      item.progress = item.initialProgress
+    } catch {
+      // 查询失败（任务已过期/被取消）：清空旧引用，降级为新建上传任务
+      item.taskId = null
+      item.skipChunks = []
+      item.initialProgress = 0
+    }
+  }
+  item.status = 'pending'
+  item.uploadPhase = 'preparing'
+  item.displayProgress = item.progress
+  tryStartProcessing()
+}
+
+async function cancelItem(item) {
+  try { await ElMessageBox.confirm('确定取消 ' + item.name + '？', '确认取消', { type: 'warning' }) } catch { return }
+  // 先中止正在进行的 HTTP 请求，避免后续分片继续发送浪费带宽
+  if (item.abortController) item.abortController.abort()
+  // 通知后端清理已上传的分片和任务记录
+  if (item.taskId) {
+    uploadCancel(item.taskId).catch(() => { /* 后端清理失败不阻塞前端删除 */ })
+  }
+  uploadStore.removeItem(item.id)
+}
+
+async function batchPause() {
+  // 显式复制避免迭代过程中响应式数组变化导致遗漏
+  const items = [...uploadStore.uploadingItems]
+  for (const item of items) await pauseItem(item)
+}
+
+async function batchResume() {
+  const pausedItems = uploadStore.queue.filter(i => i.status === 'paused')
+  for (const item of pausedItems) await resumeItem(item)
+  if (pausedItems.length > 0) {
+    ElMessage.success(`已恢复 ${pausedItems.length} 个上传任务`)
+  }
+}
+
+async function batchCancel() {
+  try { await ElMessageBox.confirm('确定取消所有上传任务？', '确认批量取消', { type: 'warning' }) } catch { return }
+  for (const item of [...uploadStore.queue]) {
+    // 先中止所有正在进行的 HTTP 请求
+    if (item.abortController) item.abortController.abort()
+    // 通知后端清理已上传的分片和任务记录
+    if (item.taskId) {
+      uploadCancel(item.taskId).catch(() => { /* 后端清理失败不阻塞前端删除 */ })
+    }
+    uploadStore.removeItem(item.id)
   }
 }
 
 async function loadUploadList() {
-  try {
-    const res = await recentItems(7)
-    recentUploads.value = res.data || []
-  } catch {
-    recentUploads.value = []
-  }
+  try { const res = await recentItems(7); recentUploads.value = res.data || [] } catch { recentUploads.value = [] }
 }
 
 async function loadDownloadList() {
-  try {
-    const res = await recentSaves(7)
-    recentDownloads.value = res.data || []
-  } catch {
-    recentDownloads.value = []
-  }
+  try { const res = await recentSaves(7); recentDownloads.value = res.data || [] } catch { recentDownloads.value = [] }
 }
 
-async function resumeTask(task) {
-  // 同会话内暂停：uploadStore.queue 里还保留着 File 对象
-  const stored = uploadStore.queue.find(i => i.taskId === task.taskId && i.status === 'paused' && i.file)
-  if (stored) {
-    window.dispatchEvent(new CustomEvent('resume-started', { detail: { taskId: task.taskId } }))
-    const chunksRes = await getCompletedChunks(task.taskId)
-    stored.skipChunks = chunksRes.data || []
-    stored.initialProgress = stored.skipChunks.length
-    // 改回 pending 排到队尾
-    stored.status = 'pending'
-    // 去重：移到数组末尾
-    const idx = uploadStore.queue.indexOf(stored)
-    if (idx !== -1) {
-      uploadStore.queue.splice(idx, 1)
-      uploadStore.queue.push(stored)
-    }
-    // 重启 processQueue
-    tryStartProcessing()
-    return
-  }
-
-  // IndexedDB 回退：刷新后队列为空，从 IndexedDB 恢复
-  try {
-    const cached = await getUploadFileByTaskId(task.taskId)
-    if (cached) {
-      window.dispatchEvent(new CustomEvent('resume-started', { detail: { taskId: task.taskId } }))
-      const item = uploadStore.addFiles([cached.file], task.parentId)[0]
-      item.taskId = task.taskId
-      const chunksRes = await getCompletedChunks(task.taskId)
-      item.skipChunks = chunksRes.data || []
-      item.initialProgress = item.skipChunks.length
-      tryStartProcessing()
-      return
-    }
-  } catch { /* fall through to file picker */ }
-
-  // 跨会话 + 无 IndexedDB：弹文件选择框
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.style.display = 'none'
-  input.onchange = async () => {
-    const file = input.files[0]
-    if (!file) return
-    window.dispatchEvent(new CustomEvent('resume-started', { detail: { taskId: task.taskId } }))
-    const item = uploadStore.addFiles([file])[0]
-    try {
-      const chunksRes = await getCompletedChunks(task.taskId)
-      const skipChunks = chunksRes.data || []
-      await chunkedUpload(file, task.parentId, (percent) => {
-        const bytesDelta = Math.round(task.fileSize * (percent - item.progress) / 100)
-        uploadStore.updateProgressBytes(item.id, percent, bytesDelta)
-      }, task.fileName, task.taskId, skipChunks, (taskId) => { item.taskId = taskId })
-      uploadStore.markDone(item.id)
-      ElMessage.success('续传完成')
-    } catch (err) {
-      uploadStore.markFailed(item.id, err.message || '上传失败')
-      ElMessage.error('上传失败，请重试')
-    }
-    document.body.removeChild(input)
-  }
-  document.body.appendChild(input)
-  input.click()
-}
-
-async function tryStartProcessing() {
+function tryStartProcessing() {
   if (!uploadStore.beginProcessing()) return
   whileProcess()
 }
@@ -311,49 +266,24 @@ async function tryStartProcessing() {
 async function whileProcess() {
   let item
   while ((item = uploadStore.startNext())) {
-    const file = item.file
-    const parentId = item.parentId
+    const f = item.file; const p = item.parentId
     try {
       if (item.skipChunks?.length) {
-        // 续传：保留已有分片
-        item.progress = item.initialProgress || 0
-        const ac = new AbortController()
-        item.abortController = ac
-        await chunkedUpload(file, parentId, (percent) => {
-          const bytesDelta = Math.round((item.size || 0) * (percent - item.progress) / 100)
-          uploadStore.updateProgressBytes(item.id, percent, bytesDelta)
-        }, item.name, item.taskId, item.skipChunks, (tid) => { item.taskId = tid; updateTaskId(item.id, tid) }, ac.signal)
+        item.progress = item.initialProgress || 0; item.displayProgress = item.initialProgress || 0; item.uploadPhase = 'preparing'
+        const ac = new AbortController(); item.abortController = ac
+        await chunkedUpload(f, p, (pct) => uploadStore.updateProgressBytes(item.id, pct, Math.round((item.size||0)*(pct-item.progress)/100)),
+          item.name, item.taskId, item.skipChunks, (tid) => { item.taskId=tid; updateTaskId(item.id,tid) }, ac.signal,
+          ({ batchDuration, batchBytes, totalPercent }) => uploadStore.startSmoothProgress(item.id, batchDuration, totalPercent, batchDuration>0?batchBytes/(batchDuration/1000):0))
+        uploadStore.setMergingPhase(item.id); uploadStore.completeMerge(item.id)
+      } else if (f.size > 10*1024*1024) {
+        item.progress = 1; item.displayProgress = 0; item.uploadPhase = 'preparing'
+        const ac = new AbortController(); item.abortController = ac
+        await chunkedUpload(f, p, (pct) => { item.progress=pct }, undefined, undefined, undefined, (tid) => { item.taskId=tid; updateTaskId(item.id,tid) }, ac.signal,
+          ({ batchDuration, batchBytes, totalPercent }) => uploadStore.startSmoothProgress(item.id, batchDuration, totalPercent, batchDuration>0?batchBytes/(batchDuration/1000):0))
+        uploadStore.setMergingPhase(item.id); uploadStore.completeMerge(item.id)
       } else {
-        const CHUNK_THRESHOLD = 10 * 1024 * 1024
-        if (file.size > CHUNK_THRESHOLD) {
-          item.progress = 1
-          let targetProgress = 1
-          let stepTimer = null
-          function startStepper() {
-            if (stepTimer) return
-            stepTimer = setInterval(() => {
-              const gap = targetProgress - item.progress
-              if (gap <= 0) { clearInterval(stepTimer); stepTimer = null; return }
-              item.progress += Math.min(3, gap)
-            }, 400)
-          }
-          const ac = new AbortController()
-          item.abortController = ac
-          try {
-            await chunkedUpload(file, parentId, (percent) => {
-              targetProgress = percent
-              startStepper()
-            }, undefined, undefined, undefined, (taskId) => {
-              item.taskId = taskId
-              updateTaskId(item.id, taskId)
-            }, ac.signal)
-          } finally {
-            if (stepTimer) { clearInterval(stepTimer); stepTimer = null }
-          }
-        } else {
-          // 小文件
-          await uploadItem({ file, parentId: parentId, onProgress: (p) => uploadStore.updateProgress(item.id, p) })
-        }
+        const ac = new AbortController(); item.abortController = ac
+        await uploadApi(f, p||0, (pct) => uploadStore.updateProgress(item.id, pct), undefined, undefined, ac.signal)
       }
       uploadStore.markDone(item.id)
     } catch (e) {
@@ -364,128 +294,53 @@ async function whileProcess() {
   uploadStore.endProcessing()
 }
 
-async function uploadItem({ file, parentId, onProgress }) {
-  return uploadApi(file, parentId || 0, onProgress)
-}
-
-async function cancelPending(item) {
-  uploadStore.removeItem(item.id)
-}
-
-async function deleteUnfinished(task) {
-  try {
-    await deleteUploadTask(task.taskId)
-    ElMessage.success('上传记录已删除')
-  } catch {
-    ElMessage.error('删除上传记录失败')
-  }
-  unfinishedTasks.value = unfinishedTasks.value.filter(t => t.taskId !== task.taskId)
-}
-
-async function pauseItem(item) {
-  try {
-    if (item.abortController) item.abortController.abort()
-    if (item.taskId) await uploadPause(item.taskId)
-    item.status = 'paused'
-    loadUnfinishedTasks()
-    ElMessage.success('上传已暂停')
-  } catch (e) {
-    ElMessage.error('暂停失败，请重试')
-  }
-}
-
 onMounted(async () => {
-  // 1. 从 IndexedDB 恢复所有文件，按 createdAt 排序
   const existingIds = new Set(uploadStore.queue.map(i => i.id))
-  let tasks = []
-  try { const r = await listTasks(); tasks = r.data || [] } catch { /* ignore */ }
   try {
     const cached = await getAllUploadFiles()
-    const taskMap = new Map(tasks.map(t => [t.taskId, t]))
-
     for (const c of cached) {
-      if (existingIds.has(c.id)) continue // 去重
-
-      let backendTask = c.taskId ? taskMap.get(c.taskId) : null
-
-      // taskId 不匹配 → 按文件名+大小兜底匹配
-      if (!backendTask) {
-        const m = tasks.find(t => t.fileName === c.name && t.fileSize === c.size && t.status === 'uploading')
-        if (m) { c.taskId = m.taskId; await updateTaskId(c.id, m.taskId); backendTask = m }
-      }
-
-      // 脏数据：taskId 不在后端列表中 → 跳过
-      if (c.taskId && !backendTask) continue
-
-      if (backendTask && backendTask.status === 'paused') {
-        // 暂停的任务不加入队列，由 loadUnfinishedTasks 显示
-        continue
-      }
-
+      if (existingIds.has(c.id)) continue
       const item = uploadStore.addFiles([c.file], c.parentId, true)[0]
-      item.id = c.id
-      item.taskId = c.taskId
-      if (backendTask) {
-        const chunksRes = await getCompletedChunks(c.taskId)
-        item.skipChunks = chunksRes.data || []
-        item.initialProgress = item.skipChunks.length
-        item.progress = item.initialProgress
+      item.id = c.id; item.taskId = c.taskId
+      if (c.taskId) {
+        try {
+          const cr = await getCompletedChunks(c.taskId)
+          item.skipChunks = cr.data || []
+          // 将已上传分片个数转为百分比，与 resumeItem 保持一致
+          const count = item.skipChunks.length
+          const estTotal = estimateTotalChunks(item.size)
+          const pct = count > 0 ? Math.round((count / estTotal) * 100) : 0
+          item.initialProgress = pct; item.progress = pct; item.displayProgress = pct
+        } catch {
+          // 查询失败（任务已过期/被取消）：清空 taskId，下次恢复时走新建上传
+          item.taskId = null
+          item.skipChunks = []
+          item.initialProgress = 0
+          item.progress = 0
+          item.displayProgress = 0
+        }
       }
+      item.status = 'paused'; item.uploadPhase = 'preparing'
     }
   } catch { /* ignore */ }
-
   tryStartProcessing()
-
-  // 2. 加载列表
-  loadUnfinishedTasks()
   loadUploadList()
   loadDownloadList()
-  window.addEventListener('resume-started', onResumeStarted)
   uploadStore.startCleanup()
 })
 
-onUnmounted(() => {
-  window.removeEventListener('resume-started', onResumeStarted)
-  uploadStore.stopCleanup()
-})
-
-function onResumeStarted(e) {
-  const taskId = e.detail?.taskId
-  if (taskId) {
-    unfinishedTasks.value = unfinishedTasks.value.filter(t => t.taskId !== taskId)
-  }
-}
+onUnmounted(() => { uploadStore.stopCleanup() })
 </script>
 
 <style scoped>
 .transfer-page { min-height: 400px; }
 .transfer-card { border-radius: 8px; min-height: 300px; }
-.upload-summary { font-size: 13px; color: #409eff; margin-bottom: 12px; }
-.upload-item { padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
-.upload-item:last-child { border-bottom: none; }
-.upload-item-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.upload-item-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.upload-item-name.folder-icon { font-weight: 600; }
-.upload-item-speed { font-size: 12px; color: #67c23a; margin: 0 8px; flex-shrink: 0; font-weight: 500; }
-.upload-item-size { font-size: 12px; color: #909399; margin-left: 8px; flex-shrink: 0; }
-.upload-item-failed { background: #fef0f0; border-radius: 4px; padding: 8px; margin-top: 4px; }
-.upload-item-error { font-size: 12px; color: #f56c6c; margin-top: 4px; }
-.failed-files-list { font-size: 11px; color: #909399; margin-top: 4px; padding-left: 12px; max-height: 120px; overflow-y: auto; }
-.failed-file-item { line-height: 1.6; }
-.resume-item { background: #ecf5ff; border-radius: 4px; padding: 8px; margin-bottom: 4px; }
-.section-label { font-size: 13px; color: #f56c6c; margin-bottom: 8px; font-weight: 600; }
-.file-name-text { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* ─── 进度条动画 ─── */
-:deep(.el-progress-bar__inner) { transition: width 0.4s ease !important; }
-:deep(.progress-active .el-progress-bar__inner) {
-  background-image: linear-gradient(90deg, transparent 0%, transparent 35%, rgba(255,255,255,0.75) 50%, transparent 65%, transparent 100%) !important;
-  background-size: 300% 100% !important;
-  background-repeat: no-repeat !important;
-  animation: sweepFlash 2s ease-in-out infinite !important;
-}
-@keyframes sweepFlash {
-  0%   { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
+.toolbar { display: flex; align-items: center; margin-bottom: 10px; gap: 8px; }
+.toolbar-hint { font-size: 13px; color: #909399; }
+.name-cell { display: flex; align-items: center; }
+.item-name { font-size: 13px; }
+.item-name.is-folder { font-weight: 600; }
+.hover-actions { margin-left: 10px; white-space: nowrap; display: inline-flex; gap: 2px; }
+.progress-label { font-size: 12px; color: #606266; margin-bottom: 2px; min-height: 18px; }
+.progress-pct { font-size: 11px; color: #909399; margin-top: 1px; }
 </style>

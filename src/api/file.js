@@ -84,9 +84,10 @@ export function listTrash(page = 1, size = 20) {
  * @param {function} onProgress - optional progress callback (percent 0-100)
  * @param {number} timeout - optional timeout in ms (default 600000 = 10min)
  * @param {string} fileName - optional filename override (strips path separators)
+ * @param {AbortSignal} signal - optional: abort signal for pause
  * @returns {Promise}
  */
-export function upload(file, parentId, onProgress, timeout, fileName) {
+export function upload(file, parentId, onProgress, timeout, fileName, signal) {
   const formData = new FormData()
   // 传入 fileName 时覆写 multipart 的 Content-Disposition filename，避免路径分隔符
   if (fileName) {
@@ -99,7 +100,8 @@ export function upload(file, parentId, onProgress, timeout, fileName) {
   }
   const config = {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: timeout || 600000
+    timeout: timeout || 600000,
+    signal
   }
   if (onProgress) {
     config.onUploadProgress = (progressEvent) => {
@@ -198,9 +200,22 @@ export function deleteUploadTask(taskId) {
 }
 
 /**
+ * 根据文件大小估算总分片数，与 chunkedUpload 内部公式完全一致。
+ * 用于在未调用 chunkedUpload 时（如 resumeItem / onMounted）将已上传分片个数转为百分比。
+ * @param {number} fileSize - 文件字节数
+ * @returns {number} 总分片数
+ */
+export function estimateTotalChunks(fileSize) {
+  const TARGET_CHUNK_SIZE = 5 * 1024 * 1024
+  const MIN_CHUNKS = 20
+  const MAX_CHUNKS = 500
+  return Math.max(MIN_CHUNKS, Math.min(MAX_CHUNKS, Math.ceil(fileSize / TARGET_CHUNK_SIZE)))
+}
+
+/**
  * 分片上传文件（> 10MB 走此路径），支持断点续传和异步合并轮询
  * <p>
- * 客户端用 File.slice() 切为 5MB 分片，逐个 HTTP 上传，
+ * 客户端用 File.slice() 切为固定分片，逐个 HTTP 上传，
  * 服务端存储后异步合并。进度 = (已发送分片 / 总分片) * 100，真实反映网络传输。
  *
  * @param {File} file
@@ -210,10 +225,14 @@ export function deleteUploadTask(taskId) {
  * @param {number} resumeTaskId - optional: resume an existing task instead of init new
  * @param {number[]} skipChunks - optional: chunk indices to skip (already uploaded)
  * @param {function} onTaskInit - optional: called with (taskId) after task init/resume
+ * @param {AbortSignal} signal - optional: abort signal for pause
+ * @param {function} onBatchComplete - optional: called after each batch with { batchIndex, batchCount, batchDuration, batchBytes, totalPercent }
  * @returns {Promise}
  */
-export async function chunkedUpload(file, parentId, onProgress, fileName, resumeTaskId, skipChunks, onTaskInit, signal) {
-  const totalChunks = 100
+export async function chunkedUpload(file, parentId, onProgress, fileName, resumeTaskId, skipChunks, onTaskInit, signal, onBatchComplete) {
+  // 动态分片：目标每片 5MB，最少 20 片，最多 500 片
+  // 与后端 InitUploadDTO 默认值 (5MB) 对齐，确保 resume 时 chunk 边界一致
+  const totalChunks = estimateTotalChunks(file.size)
   const chunkSize = Math.ceil(file.size / totalChunks)
   const CONCURRENCY = 3
   const name = fileName || file.name
@@ -245,23 +264,51 @@ export async function chunkedUpload(file, parentId, onProgress, fileName, resume
     if (!skipSet.has(i)) pending.push(i)
   }
 
+  // 计算总批次数（用于 onBatchComplete）
+  const totalBatches = Math.ceil(pending.length / CONCURRENCY)
+  let batchIndex = 0
+
   try {
     // Step 2: Upload chunks concurrently in batches
     while (pending.length > 0) {
       if (signal?.aborted) throw new Error('paused')
       const batch = pending.splice(0, CONCURRENCY)
+      batchIndex++
 
-      await Promise.all(batch.map(async (idx) => {
+      // 记录当前批次开始时间
+      const batchStartTime = Date.now()
+
+      // 计算当前批次的总字节数
+      let batchBytes = 0
+      const batchPromises = batch.map(async (idx) => {
         const start = idx * chunkSize
         const end = Math.min(start + chunkSize, file.size)
+        batchBytes += (end - start)
         const chunkBlob = file.slice(start, end)
         await uploadChunk(taskId, idx, chunkBlob, signal)
-      }))
+      })
+
+      await Promise.all(batchPromises)
+
+      // 计算当前批次耗时
+      const batchDuration = Date.now() - batchStartTime
 
       uploadedChunks += batch.length
+      const totalPercent = Math.min(99, Math.round((uploadedChunks / totalChunks) * 100))
+
       if (onProgress) {
-        // 封顶 99%，100% 留给合并完成后由调用方设置
-        onProgress(Math.min(99, Math.round((uploadedChunks / totalChunks) * 100)))
+        onProgress(totalPercent)
+      }
+
+      // 批次完成回调：提供耗时、字节数、百分比等信息
+      if (onBatchComplete) {
+        onBatchComplete({
+          batchIndex,
+          batchCount: totalBatches,
+          batchDuration,    // 毫秒
+          batchBytes,       // 字节数
+          totalPercent      // 总体百分比 0-99
+        })
       }
     }
 
@@ -270,6 +317,7 @@ export async function chunkedUpload(file, parentId, onProgress, fileName, resume
 
     // Poll status until merge completes
     for (let retry = 0; retry < 150; retry++) {
+      if (signal?.aborted) throw new Error('paused')
       await new Promise(r => setTimeout(r, 2000))
       // 合并中持续更新进度，不让进度条停住
       if (onProgress) onProgress(99)
@@ -309,6 +357,27 @@ export function download(id) {
  */
 export function preview(id) {
   return request.get(`/files/preview/${id}`)
+}
+
+/**
+ * Move items to a different folder
+ * @param {number[]} itemIds - array of file/folder IDs
+ * @param {number|null} targetParentId - target folder ID, null for root
+ * @returns {Promise}
+ */
+export function moveItems(itemIds, targetParentId) {
+  return request.put('/files/move', { itemIds, targetParentId })
+}
+
+/**
+ * Batch download multiple files/folders as a ZIP
+ * @param {number[]} itemIds - array of file/folder IDs
+ */
+export function batchDownloadUrl(itemIds) {
+  const base = import.meta.env.VITE_APP_BASE_API || ''
+  const token = localStorage.getItem('m78_token')
+  const ids = itemIds.join(',')
+  return `${base}/files/download/batch?ids=${ids}&token=${encodeURIComponent(token)}`
 }
 
 /**

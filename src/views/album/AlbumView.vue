@@ -598,13 +598,15 @@ onMounted(loadAlbums)
 }
 
 .album-card {
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: transform 0.2s, border-color 0.2s;
+  border: 1px solid #e4e7ed;
 }
 
 .album-card:hover {
   transform: translateY(-2px);
+  border-color: #409eff;
 }
 
 .album-cover {

@@ -47,6 +47,24 @@
           <el-icon><Lock /></el-icon>
           <template #title>保险箱</template>
         </el-menu-item>
+        <el-sub-menu index="/admin" v-if="userStore.userInfo?.role === 'admin'">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>管理后台</span>
+          </template>
+          <el-menu-item index="/admin">
+            <template #title>仪表盘</template>
+          </el-menu-item>
+          <el-menu-item index="/admin/users">
+            <template #title>用户管理</template>
+          </el-menu-item>
+          <el-menu-item index="/admin/nodes">
+            <template #title>存储节点</template>
+          </el-menu-item>
+          <el-menu-item index="/admin/logs">
+            <template #title>操作日志</template>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
 
       <div class="sidebar-footer" v-if="!isCollapsed">
@@ -139,10 +157,13 @@
       <el-button type="primary" :disabled="!selectedImageId" @click="confirmImageSelection">确定</el-button>
     </template>
   </el-dialog>
+
+  <!-- ========== AI 助手浮动组件 ========== -->
+  <AiAssistant />
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { getToken } from '@/utils/auth'
@@ -150,9 +171,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   HomeFilled, FolderOpened, Delete, Upload, Share,
   Picture, Lock,
-  Expand, Fold, UserFilled, SwitchButton
+  Expand, Fold, UserFilled, SwitchButton, Setting
 } from '@element-plus/icons-vue'
 import BreadCrumb from '@/components/BreadCrumb.vue'
+import AiAssistant from '@/components/AiAssistant.vue'
 import { updateProfile, updatePassword, updateAvatar, uploadAvatarTemp } from '@/api/user'
 import { listItems } from '@/api/file'
 
@@ -216,13 +238,15 @@ const pwdRules = {
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/files')) return '/files'
+  if (route.path.startsWith('/admin')) return '/admin'
+  if (route.path.startsWith('/albums') && route.params.id) return '/albums'
   return route.path
 })
 
 function handleLogout() {
   ElMessageBox.confirm('确定要退出登录吗？', '提示').then(() => {
     userStore.logout()
-    router.push('/login')
+    window.location.href = '/login'
   }).catch(() => {})
 }
 
@@ -286,7 +310,7 @@ async function openImagePicker() {
   selectedImageStorageKey.value = ''
   imageLoading.value = true
   try {
-    const res = await listItems(null, 1, 200, { type: 'image' })
+    const res = await listItems(-1, 1, 200, { type: 'image' })
     imageList.value = (res.data?.records || []).filter(f => !f.isDirectory)
   } catch {
     imageList.value = []
@@ -325,7 +349,7 @@ async function handleSavePassword() {
     pwdForm.newPassword = ''
     pwdForm.confirmPassword = ''
     userStore.logout()
-    router.push('/login')
+    window.location.href = '/login'
   } catch (e) {
     ElMessage.error(e.response?.data?.msg || e.message || '修改密码失败')
   } finally {
@@ -339,9 +363,14 @@ onMounted(async () => {
     const ok = await userStore.fetchUserInfo()
     if (!ok) {
       userStore.logout()
-      router.push('/login')
+      window.location.href = '/login'
     }
   }
+})
+
+onUnmounted(() => {
+  // 页面离开时取消所有活跃请求，避免 401 风暴
+  cancelAllPendingRequests()
 })
 </script>
 
@@ -496,4 +525,5 @@ onMounted(async () => {
   overflow-y: auto;
   flex: 1;
 }
+
 </style>
