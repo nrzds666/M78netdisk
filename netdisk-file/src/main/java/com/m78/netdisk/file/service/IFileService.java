@@ -108,6 +108,14 @@ public interface IFileService {
     ZipResult getFolderZip(Long ownerId, Long folderId);
 
     /**
+     * 批量下载：将多个文件/文件夹打包成 ZIP
+     * @param ownerId  用户ID
+     * @param itemIds  文件/文件夹ID列表
+     * @return ZipResult（流式 ZIP 输出）
+     */
+    ZipResult getBatchZip(Long ownerId, List<Long> itemIds);
+
+    /**
      * 获取媒体文件播放进度
      * @param ownerId 用户ID
      * @param itemId  媒体文件ID

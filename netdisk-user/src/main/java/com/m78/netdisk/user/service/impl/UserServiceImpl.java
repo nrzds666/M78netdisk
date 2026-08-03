@@ -13,6 +13,7 @@ import com.m78.netdisk.user.mapper.UserMapper;
 import com.m78.netdisk.user.service.IUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -50,10 +51,16 @@ public class UserServiceImpl implements IUserService {
                 .setPasswordHash(passwordEncoder.encode(formDTO.getPassword()))
                 .setEmail(formDTO.getEmail())
                 .setStatus(1)
+                .setRole("user")
                 .setQuotaBytes(defaultQuota)
                 .setUsedBytes(0L);
 
-        userMapper.insert(user);
+        try {
+            userMapper.insert(user);
+        } catch (DuplicateKeyException e) {
+            // 并发注册时另一个请求可能已经插入了同名用户
+            throw new BizException("用户名已存在");
+        }
         return buildLoginVO(user);
     }
 
@@ -72,6 +79,12 @@ public class UserServiceImpl implements IUserService {
             throw new BizException("用户名或密码错误");
         }
 
+        // 兼容旧数据：role 为 null 时默认设为 user
+        if (user.getRole() == null) {
+            user.setRole("user");
+            userMapper.updateById(user);
+        }
+
         return buildLoginVO(user);
     }
 
@@ -82,14 +95,14 @@ public class UserServiceImpl implements IUserService {
             throw new BizException(401, "刷新令牌不能为空");
         }
 
-        Long userId = jwtTool.parseToken(refreshToken);
+        JwtTool.TokenPayload payload = jwtTool.parseToken(refreshToken);
+        Long userId = payload.getUserId();
 
         User user = userMapper.selectById(userId);
         if (user == null || user.getStatus() != 1) {
             throw new BizException(401, "用户不存在或已被禁用");
         }
 
-        // 旧 refresh token 会被新生成的覆盖，access token 自然过期
         return buildLoginVO(user);
     }
 
@@ -105,6 +118,7 @@ public class UserServiceImpl implements IUserService {
                 .email(user.getEmail())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
+                .role(user.getRole())
                 .quotaBytes(user.getQuotaBytes())
                 .usedBytes(user.getUsedBytes())
                 .createdAt(user.getCreatedAt().toString())
@@ -126,7 +140,6 @@ public class UserServiceImpl implements IUserService {
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userMapper.updateById(user);
-        // 强制所有设备重新登录
         jwtTool.logout(userId);
     }
 
@@ -156,7 +169,6 @@ public class UserServiceImpl implements IUserService {
         if (username.length() < 2 || username.length() > 32) {
             throw new BizException("用户名长度需在2-32个字符之间");
         }
-        // 检查重名
         User existing = userMapper.selectOne(
                 new LambdaQueryWrapper<User>()
                         .eq(User::getUsername, username)
@@ -172,14 +184,12 @@ public class UserServiceImpl implements IUserService {
         userMapper.updateById(user);
     }
 
-    // 重置 token：注册/登录时调用，自动签发全新的 access + refresh token
     private UserLoginVO buildLoginVO(User user) {
         return buildLoginVO(user, null);
     }
 
-    // 重置 token：可传入已有的 refreshToken 复用（/refresh 场景）
     private UserLoginVO buildLoginVO(User user, String refreshToken) {
-        String accessToken = jwtTool.createAccessToken(user.getId());
+        String accessToken = jwtTool.createAccessToken(user.getId(), user.getRole());
         if (StrUtil.isBlank(refreshToken)) {
             refreshToken = jwtTool.createRefreshToken(user.getId());
         }

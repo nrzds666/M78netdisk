@@ -20,6 +20,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/users/login",
                         "/api/users/register",
                         "/api/users/captcha",
+                        "/api/users/refresh",
                         "/api/shares/access/**",
                         "/api/albums/share-access/**");
     }

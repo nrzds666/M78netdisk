@@ -2,6 +2,7 @@
 -- Migration: 给 upload_tasks 表增加 upload_id 和 merged_key 列
 -- 用于 OSS MultipartUpload 分片上传支持
 -- 日期: 2026-06-12
+-- 状态: 已合并入 init.sql（2026-06-17），新部署无需执行此迁移
 -- ============================================================
 
 ALTER TABLE upload_tasks

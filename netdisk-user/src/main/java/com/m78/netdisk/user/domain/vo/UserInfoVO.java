@@ -17,5 +17,6 @@ public class UserInfoVO {
     private Integer status;
     private Long quotaBytes;
     private Long usedBytes;
+    private String role;
     private String createdAt;
 }

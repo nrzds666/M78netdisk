@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
 
 @Aspect
@@ -43,6 +43,11 @@ public class AuditLogAspect {
     public Object around(ProceedingJoinPoint joinPoint, AuditLog auditLog) throws Throwable {
         // 先执行业务方法
         Object result = joinPoint.proceed();
+
+        // Flux/FluxLike 类型不记录审计日志，避免阻塞流式响应
+        if (result != null && "reactor.core.publisher.Flux".equals(result.getClass().getName())) {
+            return result;
+        }
 
         try {
             Long userId = UserContext.getUserId();

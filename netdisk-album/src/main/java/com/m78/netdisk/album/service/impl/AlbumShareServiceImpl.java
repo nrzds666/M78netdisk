@@ -119,7 +119,7 @@ public class AlbumShareServiceImpl implements IAlbumShareService {
                             .name(item.getName())
                             .mimeType(item.getMimeType())
                             .size(item.getSize())
-                            .thumbnailKey(item.getThumbnailKey())
+                            .thumbnailKey(mapThumbnailUrl(item.getThumbnailKey(), item.getId()))
                             .addedAt(ai.getAddedAt() != null ? ai.getAddedAt().toString() : null)
                             .build());
                 }
@@ -138,11 +138,11 @@ public class AlbumShareServiceImpl implements IAlbumShareService {
 
     @Override
     public void streamSharedAlbumFile(String token, Long itemId,
-                                       javax.servlet.http.HttpServletRequest request,
-                                       javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
+                                       jakarta.servlet.http.HttpServletRequest request,
+                                       jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
         AlbumShare share = albumShareMapper.selectByActiveToken(token);
         if (share == null) {
-            response.sendError(javax.servlet.http.HttpServletResponse.SC_NOT_FOUND, "分享链接不存在或已过期");
+            response.sendError(jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND, "分享链接不存在或已过期");
             return;
         }
 
@@ -152,14 +152,14 @@ public class AlbumShareServiceImpl implements IAlbumShareService {
                         .eq(AlbumItem::getAlbumId, share.getAlbumId())
                         .eq(AlbumItem::getItemId, itemId));
         if (count == null || count == 0) {
-            response.sendError(javax.servlet.http.HttpServletResponse.SC_FORBIDDEN, "文件不属于该相册");
+            response.sendError(jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN, "文件不属于该相册");
             return;
         }
 
         // Get file info
         Item item = itemMapper.selectById(itemId);
         if (item == null || Boolean.TRUE.equals(item.getIsDeleted())) {
-            response.sendError(javax.servlet.http.HttpServletResponse.SC_NOT_FOUND, "文件不存在或已被删除");
+            response.sendError(jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND, "文件不存在或已被删除");
             return;
         }
 
@@ -180,7 +180,15 @@ public class AlbumShareServiceImpl implements IAlbumShareService {
             response.getOutputStream().flush();
         } catch (Exception e) {
             log.error("流式输出分享相册文件失败: token={}, itemId={}", token, itemId, e);
-            response.sendError(javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件读取失败");
+            response.sendError(jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件读取失败");
         }
+    }
+
+    private String mapThumbnailUrl(String rawKey, Long itemId) {
+        if (rawKey == null) return null;
+        String publicUrl = storageService.getPublicUrl(rawKey);
+        if (publicUrl != null) return publicUrl;
+        if (itemId != null) return "/api/files/thumbnail/" + itemId;
+        return null;
     }
 }

@@ -156,8 +156,8 @@ public class LunarCalendarUtil {
         String dayName = lunarDay >= 1 && lunarDay <= 30
                 ? LunarCalendarData.LUNAR_DAY_NAMES[lunarDay - 1] : "\u521d\u4e00";
 
-        // 建除
-        String jianChu = getJianChu(lunarMonth, lunarDay);
+        // 建除（传入正确的日地支 index，而非农历日期）
+        String jianChu = getJianChu(lunarMonth, dayBranchIndex);
 
         return new LunarDate(lunarYear, lunarMonth, lunarDay, isLeap,
                 yearStem, yearBranch, zodiac,
@@ -267,16 +267,19 @@ public class LunarCalendarUtil {
     // ==================== 建除十二神 ====================
 
     /**
-     * 根据农历月、日计算建除
+     * 根据农历月和日地支计算建除
      * 算法：正月寅、二月卯…月地支=(month+1)%12
      * 日地支与月地支的关系决定建除
+     *
+     * @param lunarMonth   农历月 (1-12)
+     * @param dayBranchIdx 日地支 index (0=子, 1=丑, ..., 11=亥)，由公历日期通过 60 天干循环推算
      */
-    public static String getJianChu(int lunarMonth, int lunarDay) {
+    public static String getJianChu(int lunarMonth, int dayBranchIdx) {
         // 月地支：正月=寅(2)，二月=卯(3)...
         int monthDiZhi = (lunarMonth + 1) % 12; // 正月=2(寅)
 
-        // 日地支
-        int dayDiZhi = (lunarDay - 1) % 12;
+        // 日地支（直接传入，不再用 lunarDay 推算）
+        int dayDiZhi = dayBranchIdx;
 
         // 建除十二神：建除满平定执破危成收开闭
         String[] jianChuArray = {"\u5efa", "\u9664", "\u6ee1", "\u5e73", "\u5b9a", "\u6267",

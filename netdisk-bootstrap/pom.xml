@@ -50,6 +50,14 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- 【新增】热部署：直接声明在bootstrap模块，不依赖Maven dev profile -->
+        <!-- runtime+optional 确保不会打进生产JAR -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>com.m78</groupId>
             <artifactId>netdisk-vault</artifactId>
@@ -58,6 +66,11 @@
         <dependency>
             <groupId>com.m78</groupId>
             <artifactId>netdisk-calendar</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.m78</groupId>
+            <artifactId>netdisk-ai</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- jodconverter -->
@@ -83,6 +96,8 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <fork>true</fork>
+                    <addResources>true</addResources>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

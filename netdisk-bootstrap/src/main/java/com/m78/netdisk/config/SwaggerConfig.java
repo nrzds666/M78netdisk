@@ -5,7 +5,7 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
-import org.springdoc.core.GroupedOpenApi;
+import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -77,6 +77,14 @@ public class SwaggerConfig {
         return GroupedOpenApi.builder()
                 .group("相册模块")
                 .pathsToMatch("/api/albums/**")
+                .build();
+    }
+
+    @Bean
+    public GroupedOpenApi aiApi() {
+        return GroupedOpenApi.builder()
+                .group("AI 助手")
+                .pathsToMatch("/api/chat/**")
                 .build();
     }
 }

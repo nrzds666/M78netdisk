@@ -4,9 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.m78.netdisk.common.client.RagClient;
 import com.m78.netdisk.common.exception.BizException;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.dto.*;
+import com.m78.netdisk.file.event.FileCreatedEvent;
+import com.m78.netdisk.file.event.FilePermanentlyDeletedEvent;
+import com.m78.netdisk.file.event.FileRenamedEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.domain.po.ItemVersion;
 import com.m78.netdisk.file.domain.po.MediaProgress;
@@ -55,6 +61,10 @@ public class FileServiceImpl implements IFileService {
     private final UserMapper userMapper;
     private final MediaProgressMapper mediaProgressMapper;
     private final UploadMergeService uploadMergeService;
+    private final RagClient ragClient;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     // ==================== 文件/文件夹 CRUD ====================
 
@@ -141,6 +151,9 @@ public class FileServiceImpl implements IFileService {
             throw new BizException("存储空间不足，无法上传文件");
         }
 
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(new FileCreatedEvent(this, item));
+        }
         log.info("文件上传完成: userId={}, fileName={}, size={}, itemId={}",
                 ownerId, fileName, fileSize, item.getId());
         return toItemVO(item);
@@ -193,6 +206,7 @@ public class FileServiceImpl implements IFileService {
             newName.equals("..") || newName.contains("\0")) {
             throw new BizException("文件名包含非法字符");
         }
+        String oldName = item.getName();
         item.setName(newName);
         item.setPath(rebuildPath(item));
         itemMapper.updateById(item);
@@ -203,11 +217,16 @@ public class FileServiceImpl implements IFileService {
             List<Item> children = itemMapper.selectList(
                     new LambdaQueryWrapper<Item>()
                             .eq(Item::getOwnerId, ownerId)
-                            .apply("path LIKE {0} ESCAPE '!'", escapeLike(oldPathPrefix)));
+                            .apply("path LIKE {0} ESCAPE '!'", escapeLike(oldPathPrefix) + "%"));
             for (Item child : children) {
                 child.setPath(item.getPath() + child.getPath().substring(oldPath.length()));
                 itemMapper.updateById(child);
             }
+        }
+
+        // 发布重命名事件（RAG 索引更新等）
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(new FileRenamedEvent(this, item, oldName));
         }
 
         return toItemVO(item);
@@ -230,6 +249,9 @@ public class FileServiceImpl implements IFileService {
             }
             if (!parent.getIsDirectory()) {
                 throw new BizException("目标不是文件夹");
+            }
+            if (!parent.getOwnerId().equals(ownerId)) {
+                throw new BizException("无权操作目标目录");
             }
             parentPath = parent.getPath();
         }
@@ -263,7 +285,7 @@ public class FileServiceImpl implements IFileService {
                 List<Item> children = itemMapper.selectList(
                         new LambdaQueryWrapper<Item>()
                                 .eq(Item::getOwnerId, ownerId)
-                                .apply("path LIKE {0} ESCAPE '!'", escapeLike(oldPrefix)));
+                                .apply("path LIKE {0} ESCAPE '!'", escapeLike(oldPrefix) + "%"));
                 for (Item child : children) {
                     child.setPath(newPrefix + child.getPath().substring(oldPrefix.length()));
                     itemMapper.updateById(child);
@@ -343,6 +365,11 @@ public class FileServiceImpl implements IFileService {
             Item item = itemMapper.selectById(id);
             if (item == null || !item.getOwnerId().equals(ownerId)) continue;
 
+            // 采集删除前快照（供异步 RAG 清理事件使用，避免回查已删除的 DB 记录）
+            FilePermanentlyDeletedEvent.DeletedItemInfo snapshot =
+                    new FilePermanentlyDeletedEvent.DeletedItemInfo(
+                            item.getId(), item.getName(), item.getStorageKey(), item.getIsDirectory());
+
             // 文件不在回收站中，无法永久删除
             if (item.getIsDeleted() == null || !item.getIsDeleted()) {
                 throw new BizException("文件不在回收站中，无法永久删除: " + item.getName());
@@ -361,7 +388,14 @@ public class FileServiceImpl implements IFileService {
                 }
             }
 
-            // 先删除 DB 记录
+            // 发布永久删除事件（RAG 索引清理等），携带删除前快照避免监听器回查 DB
+            // 在 DB 删除前发布，确保事件发布失败时整个事务回滚
+            if (eventPublisher != null) {
+                eventPublisher.publishEvent(
+                        new FilePermanentlyDeletedEvent(this, ownerId, List.of(id), List.of(snapshot)));
+            }
+
+            // 再删除 DB 记录（事件发布成功后才删，保证原子性）
             itemMapper.deleteById(id);
 
             // 再清理磁盘存储（DB 删除后即使存储删除失败也没有孤儿记录）
@@ -377,6 +411,11 @@ public class FileServiceImpl implements IFileService {
             // 清理文件本身的存储（非目录且非空 storageKey）
             if (!item.getIsDirectory() && item.getStorageKey() != null) {
                 storageService.delete(item.getStorageKey());
+            }
+
+            // 清理缩略图
+            if (item.getThumbnailKey() != null) {
+                storageService.delete(item.getThumbnailKey());
             }
 
             log.info("永久删除: itemId={}, ownerId={}, name={}", id, ownerId, item.getName());
@@ -558,13 +597,13 @@ public class FileServiceImpl implements IFileService {
         // 上传完成后重新检查任务是否还存在（长时间上传期间可能已被取消/过期）
         UploadTask taskAfterUpload = uploadTaskMapper.selectById(taskId);
         if (taskAfterUpload == null) {
-            log.warn("上传任务已删除，跳过分片记录: taskId={}, chunkIndex={}", taskId, chunkIndex);
-            return;
+            log.warn("上传任务已删除: taskId={}, chunkIndex={}", taskId, chunkIndex);
+            throw new BizException("上传任务已取消或过期");
         }
         if ("expired".equals(taskAfterUpload.getStatus()) || "canceled".equals(taskAfterUpload.getStatus())) {
-            log.warn("上传任务已{}，跳过分片记录: taskId={}, chunkIndex={}",
+            log.warn("上传任务已{}: taskId={}, chunkIndex={}",
                     taskAfterUpload.getStatus(), taskId, chunkIndex);
-            return;
+            throw new BizException("上传任务已取消或过期");
         }
 
         // Step 3: 记录分片 + 递增计数器（轻量事务）
@@ -710,7 +749,7 @@ public class FileServiceImpl implements IFileService {
                 Item item = new Item()
                         .setOwnerId(ownerId).setParentId(task.getParentId())
                         .setName(task.getFileName()).setIsDirectory(false)
-                        .setSize(task.getFileSize()).setMimeType(task.getMimeType())
+                        .setSize(task.getFileSize()).setMimeType(resolveMimeType(task.getFileName(), task.getMimeType()))
                         .setStorageKey(task.getMergedKey()).setPath(path).setVersion(1);
                 itemMapper.insert(item);
 
@@ -726,6 +765,9 @@ public class FileServiceImpl implements IFileService {
                     throw new BizException("存储空间不足，无法完成上传");
                 }
 
+                if (eventPublisher != null) {
+                    eventPublisher.publishEvent(new FileCreatedEvent(this, item));
+                }
                 task.setStatus("completed");
                 uploadTaskMapper.updateById(task);
                 log.info("上传完成(MPU): userId={}, fileName={}, size={}",
@@ -821,7 +863,7 @@ public class FileServiceImpl implements IFileService {
         return FileDownloadVO.builder()
                 .storageKey(item.getStorageKey())
                 .fileName(item.getName())
-                .mimeType(item.getMimeType() != null ? item.getMimeType() : "application/octet-stream")
+                .mimeType(resolveMimeType(item.getName(), item.getMimeType()))
                 .fileSize(item.getSize())
                 .build();
     }
@@ -899,6 +941,81 @@ public class FileServiceImpl implements IFileService {
                     }
                 } catch (IOException e) {
                     log.error("ZIP打包失败", e);
+                    zipResult.setZipError(e);
+                } finally {
+                    try { out.close(); } catch (IOException ignored) {}
+                }
+            });
+            zipThread.setDaemon(true);
+            zipThread.start();
+
+            return zipResult;
+        } catch (IOException e) {
+            throw new RuntimeException("创建ZIP流失败", e);
+        }
+    }
+
+    @Override
+    public ZipResult getBatchZip(Long ownerId, List<Long> itemIds) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new BizException("请选择要下载的文件");
+        }
+
+        // 收集所有文件（文件夹递归展开）
+        List<Item> allFiles = new ArrayList<>();
+        for (Long itemId : itemIds) {
+            Item item = itemMapper.selectById(itemId);
+            if (item == null || !item.getOwnerId().equals(ownerId)) {
+                throw new BizException("文件不存在: " + itemId);
+            }
+            if (item.getIsDeleted()) {
+                continue;
+            }
+            if (item.getIsDirectory()) {
+                collectFiles(itemId, allFiles);
+            } else {
+                allFiles.add(item);
+            }
+        }
+
+        if (allFiles.isEmpty()) {
+            throw new BizException("没有可下载的文件");
+        }
+
+        // 构建 ZIP 条目名（去除公共前缀，保留目录结构）
+        List<String> entries = new ArrayList<>();
+        for (Item file : allFiles) {
+            if (file.getIsDirectory()) continue;
+            entries.add(file.getPath().startsWith("/") ? file.getPath().substring(1) : file.getPath());
+        }
+
+        try {
+            PipedInputStream in = new PipedInputStream(65536);
+            PipedOutputStream out = new PipedOutputStream(in);
+
+            ZipResult zipResult = new ZipResult(in, -1, entries, "batch-download.zip", null);
+            Thread zipThread = new Thread(() -> {
+                try (ZipOutputStream zos = new ZipOutputStream(out)) {
+                    byte[] buf = new byte[8192];
+                    for (Item file : allFiles) {
+                        if (file.getIsDirectory()) continue;
+                        String entryName = file.getPath().startsWith("/") ? file.getPath().substring(1) : file.getPath();
+                        if (entryName.contains("..") || entryName.startsWith("/") || entryName.startsWith("\\")) {
+                            throw new SecurityException("ZIP entry contains illegal path: " + entryName);
+                        }
+                        zos.putNextEntry(new ZipEntry(entryName));
+                        if (file.getStorageKey() != null) {
+                            try (InputStream is = storageService.getInputStream(file.getStorageKey())) {
+                                int len;
+                                while ((len = is.read(buf)) != -1) {
+                                    zos.write(buf, 0, len);
+                                }
+                            }
+                        }
+                        zos.closeEntry();
+                    }
+                } catch (IOException e) {
+                    log.error("批量下载ZIP打包失败", e);
                     zipResult.setZipError(e);
                 } finally {
                     try { out.close(); } catch (IOException ignored) {}
@@ -1021,15 +1138,25 @@ public class FileServiceImpl implements IFileService {
 
     private ItemVO toItemVO(Item item) {
         if (item == null) return null;
-        return ItemVO.builder()
+        ItemVO vo = ItemVO.builder()
                 .id(item.getId()).ownerId(item.getOwnerId()).parentId(item.getParentId())
                 .name(item.getName()).isDirectory(item.getIsDirectory()).size(item.getSize())
-                .mimeType(item.getMimeType()).etag(item.getEtag()).thumbnailKey(item.getThumbnailKey())
+                .mimeType(item.getMimeType()).etag(item.getEtag())
                 .storageKey(item.getStorageKey())
                 .path(item.getPath()).version(item.getVersion()).isFromShare(item.getIsFromShare())
                 .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
                 .updatedAt(item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null)
                 .build();
+
+        // thumbnailKey 映射：存储 key → 浏览器可访问 URL
+        if (item.getThumbnailKey() != null) {
+            String publicUrl = storageService.getPublicUrl(item.getThumbnailKey());
+            vo.setThumbnailKey(publicUrl != null
+                    ? publicUrl                                    // OSS: 直链 URL
+                    : "/api/files/thumbnail/" + item.getId());     // 本地: 端点 URL
+        }
+
+        return vo;
     }
 
     private UploadTaskVO toUploadTaskVO(UploadTask task) {
@@ -1113,6 +1240,46 @@ public class FileServiceImpl implements IFileService {
                 return "archive";
             default:
                 return "other";
+        }
+    }
+
+    /**
+     * 根据文件名扩展名推断正确的 MIME 类型。
+     * 如果当前 mimeType 已经是正确类型（非 application/octet-stream 且非 null），则返回原值。
+     * 用于纠正前端分片上传时丢失的视频/音频 MIME 类型。
+     */
+    public static String resolveMimeType(String fileName, String mimeType) {
+        if (mimeType != null && !"application/octet-stream".equals(mimeType)) {
+            return mimeType;
+        }
+        String ext = getFileExtension(fileName);
+        if (ext == null || ext.isEmpty()) {
+            return mimeType != null ? mimeType : "application/octet-stream";
+        }
+        switch (ext) {
+            case "mp4":   return "video/mp4";
+            case "webm":  return "video/webm";
+            case "ogg":   return "video/ogg";
+            case "avi":   return "video/x-msvideo";
+            case "mov":   return "video/quicktime";
+            case "mkv":   return "video/x-matroska";
+            case "wmv":   return "video/x-ms-wmv";
+            case "flv":   return "video/x-flv";
+            case "mpeg": case "mpg": return "video/mpeg";
+            case "3gp":   return "video/3gpp";
+            case "ts":    return "video/mp2t";
+            case "mp3":   return "audio/mpeg";
+            case "wav":   return "audio/wav";
+            case "flac":  return "audio/flac";
+            case "aac":   return "audio/aac";
+            case "m4a":   return "audio/mp4";
+            case "jpg": case "jpeg": return "image/jpeg";
+            case "png":   return "image/png";
+            case "gif":   return "image/gif";
+            case "webp":  return "image/webp";
+            case "bmp":   return "image/bmp";
+            case "svg":   return "image/svg+xml";
+            default:      return mimeType != null ? mimeType : "application/octet-stream";
         }
     }
 }

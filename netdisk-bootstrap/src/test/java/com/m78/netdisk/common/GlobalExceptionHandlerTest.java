@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MultipartException;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.Objects;
@@ -72,6 +73,15 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(400, result.getCode());
         assertTrue(result.getMsg().contains("captchaCode"));
+    }
+
+    @Test
+    void handleClientAbort_shouldLogWarnAndReturnVoid() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/files/preview/217");
+        ClientAbortException ex = new ClientAbortException(new java.io.IOException("远程主机强迫关闭了一个现有的连接"));
+
+        // 不抛出异常即可（void 返回，不尝试写 response）
+        assertDoesNotThrow(() -> handler.handleClientAbort(ex, request));
     }
 
     @Test

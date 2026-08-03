@@ -19,6 +19,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     avatar_url    TEXT,
     status        TINYINT NOT NULL DEFAULT 1,  -- 1=active, 0=disabled, -1=frozen
+    role          VARCHAR(32) NOT NULL DEFAULT 'user',  -- user | admin
     quota_bytes   BIGINT NOT NULL DEFAULT 10737418240,  -- 默认 10GB
     used_bytes    BIGINT NOT NULL DEFAULT 0,
     created_at    DATETIME NOT NULL DEFAULT now(),
@@ -359,6 +360,28 @@ WHERE s.share_token = ?
   AND (s.expire_at IS NULL OR s.expire_at > now())
   AND (s.max_downloads IS NULL OR s.download_count < s.max_downloads)
   AND NOT i.is_deleted;
+```
+
+### album_shares — 相册分享
+
+基于独立的分享 token，无需提取码即可公开访问。
+
+```sql
+CREATE TABLE album_shares (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    album_id      BIGINT NOT NULL,
+    user_id       BIGINT NOT NULL,
+    share_token   VARCHAR(36) NOT NULL UNIQUE,
+    expire_at     DATETIME,
+    is_active     TINYINT(1) NOT NULL DEFAULT 1,
+    created_at    DATETIME NOT NULL DEFAULT now(),
+
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_album_shares_token ON album_shares(share_token);
+CREATE INDEX idx_album_shares_album ON album_shares(album_id, is_active);
 ```
 
 ---

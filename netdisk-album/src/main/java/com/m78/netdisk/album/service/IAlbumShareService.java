@@ -19,6 +19,6 @@ public interface IAlbumShareService {
      * Stream a shared album file item by token + itemId (public, no auth)
      */
     void streamSharedAlbumFile(String token, Long itemId,
-                                javax.servlet.http.HttpServletRequest request,
-                                javax.servlet.http.HttpServletResponse response) throws java.io.IOException;
+                                jakarta.servlet.http.HttpServletRequest request,
+                                jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException;
 }

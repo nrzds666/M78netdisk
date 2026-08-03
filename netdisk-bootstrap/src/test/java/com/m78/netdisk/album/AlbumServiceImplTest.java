@@ -12,6 +12,7 @@ import com.m78.netdisk.album.mapper.AlbumItemMapper;
 import com.m78.netdisk.album.mapper.AlbumMapper;
 import com.m78.netdisk.album.service.impl.AlbumServiceImpl;
 import com.m78.netdisk.common.exception.BizException;
+import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,7 @@ class AlbumServiceImplTest {
     @Mock private AlbumMapper albumMapper;
     @Mock private AlbumItemMapper albumItemMapper;
     @Mock private ItemMapper itemMapper;
+    @Mock private StorageService storageService;
 
     @InjectMocks
     private AlbumServiceImpl albumService;

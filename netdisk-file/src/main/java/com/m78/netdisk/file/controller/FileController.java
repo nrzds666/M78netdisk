@@ -18,9 +18,9 @@ import org.springframework.web.bind.annotation.*;
 
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.validation.Valid;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -106,6 +106,34 @@ public class FileController {
     public R<Void> move(@Valid @RequestBody MoveItemsDTO dto) {
         fileService.move(UserContext.getUserId(), dto);
         return R.ok();
+    }
+
+    @GetMapping("/download/batch")
+    public void batchDownload(@RequestParam List<Long> ids,
+                               HttpServletResponse response) throws IOException {
+        ZipResult zip = fileService.getBatchZip(UserContext.getUserId(), ids);
+
+        if (zip.getZipError() != null) {
+            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                    "ZIP打包失败: " + zip.getZipError().getMessage());
+            return;
+        }
+
+        response.setContentType("application/zip");
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"" + URLEncoder.encode(zip.getZipFileName(), StandardCharsets.UTF_8)
+                        .replace("+", "%20") + "\"");
+        response.setHeader("Accept-Ranges", "none");
+
+        try (InputStream in = zip.getInputStream();
+             OutputStream out = response.getOutputStream()) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) != -1) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
+        }
     }
 
     @DeleteMapping("/trash")
@@ -292,6 +320,65 @@ public class FileController {
         }
 
         streamFile(info, request, response, "inline");
+    }
+
+    /**
+     * 获取视频首帧截图（poster），供前端 <video poster> 使用
+     * 通过 OSS video/snapshot 处理实时截取第 0 帧，返回 JPEG
+     */
+    @GetMapping("/preview/{id}/poster")
+    public void getVideoPoster(@PathVariable Long id,
+                                HttpServletResponse response) throws IOException {
+        FileDownloadVO info = fileService.getPreviewInfo(UserContext.getUserId(), id);
+
+        if (info.getMimeType() == null || !info.getMimeType().startsWith("video/")) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Not a video file");
+            return;
+        }
+
+        try (InputStream in = storageService.getVideoSnapshot(info.getStorageKey(), 0)) {
+            if (in == null) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "Poster not available");
+                return;
+            }
+            response.setContentType("image/jpeg");
+            response.setHeader("Cache-Control", "max-age=3600");
+            copy(in, response.getOutputStream(), Long.MAX_VALUE);
+        } catch (Exception e) {
+            log.warn("视频海报生成失败: id={}, storageKey={}", id, info.getStorageKey(), e);
+            if (!response.isCommitted()) {
+                response.reset();
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "Poster not available");
+            }
+        }
+    }
+
+    /**
+     * 获取缩略图，供文件列表 grid view / 相册缩略图使用。
+     * 缩略图存储位置：thumbnails/{itemId}.jpg
+     * 通过 StorageService 读取（本地磁盘或 OSS）。
+     */
+    @GetMapping("/thumbnail/{id}")
+    public void getThumbnail(@PathVariable Long id,
+                              HttpServletResponse response) throws IOException {
+        FileDownloadVO info;
+        try {
+            info = fileService.getPreviewInfo(UserContext.getUserId(), id);
+        } catch (Exception e) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "File not found");
+            return;
+        }
+
+        String thumbKey = "thumbnails/" + id + ".jpg";
+        try (InputStream in = storageService.getInputStream(thumbKey)) {
+            response.setContentType("image/jpeg");
+            response.setHeader("Cache-Control", "max-age=86400");
+            copy(in, response.getOutputStream(), Long.MAX_VALUE);
+        } catch (Exception e) {
+            if (!response.isCommitted()) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "Thumbnail not available");
+            }
+        }
     }
 
     /**

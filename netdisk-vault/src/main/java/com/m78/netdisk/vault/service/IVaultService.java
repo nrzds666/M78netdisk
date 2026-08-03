@@ -7,7 +7,7 @@ import com.m78.netdisk.vault.domain.dto.SetupVaultDTO;
 import com.m78.netdisk.vault.domain.vo.VaultStatusVO;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 
 public interface IVaultService {
 

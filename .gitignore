@@ -25,3 +25,6 @@ list_remote.bat
 
 # Storage (local file data, not code)
 storage/
+
+# Dev config with secrets — never commit
+**/application-dev.yaml

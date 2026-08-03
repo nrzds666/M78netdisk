@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     avatar_url    TEXT,
     status        TINYINT NOT NULL DEFAULT 1,  -- 1=active, 0=disabled, -1=frozen
+    role          VARCHAR(32) NOT NULL DEFAULT 'user',  -- user | admin
     quota_bytes   BIGINT NOT NULL DEFAULT 10737418240,  -- 10 GB
     used_bytes    BIGINT NOT NULL DEFAULT 0,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -300,22 +301,6 @@ CREATE TABLE IF NOT EXISTS album_items (
 
 CREATE INDEX idx_album_items_album ON album_items(album_id, added_at DESC);
 CREATE INDEX idx_album_items_item ON album_items(item_id);
-
-
--- ============================================================
--- 6. 保险箱
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS user_vaults (
-    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id       BIGINT NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_user_vaults_user ON user_vaults(user_id);
 
 
 -- ============================================================

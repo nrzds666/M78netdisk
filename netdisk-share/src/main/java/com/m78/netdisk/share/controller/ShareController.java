@@ -14,9 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
-import javax.validation.Valid;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -101,13 +101,18 @@ public class ShareController {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String jwt = authHeader.substring(7);
             try {
-                Long userId = jwtTool.parseToken(jwt);
-                UserContext.setUserId(userId);
+                JwtTool.TokenPayload payload = jwtTool.parseToken(jwt);
+                UserContext.setUserId(payload.getUserId());
+                UserContext.setRole(payload.getRole());
             } catch (Exception e) {
                 return R.unauthorized("登录已过期，请重新登录");
             }
         }
-        return R.ok(shareService.saveShareFiles(token, password, itemIds));
+        try {
+            return R.ok(shareService.saveShareFiles(token, password, itemIds));
+        } finally {
+            UserContext.remove();
+        }
     }
 
     // ==================== Stream Helper ====================
@@ -117,6 +122,15 @@ public class ShareController {
      */
     private void streamShareFile(FileDownloadVO info, HttpServletRequest request,
                                   HttpServletResponse response) throws IOException {
+        // 先验证文件在存储中是否存在，避免 header 提交后才抛出异常
+        try {
+            storageService.getInputStream(info.getStorageKey()).close();
+        } catch (Exception e) {
+            log.warn("分享文件存储不存在: storageKey={}, fileName={}", info.getStorageKey(), info.getFileName(), e);
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "文件不存在或已被删除");
+            return;
+        }
+
         String encodedName = URLEncoder.encode(info.getFileName(), StandardCharsets.UTF_8)
                 .replace("+", "%20");
         response.setHeader("Content-Disposition",

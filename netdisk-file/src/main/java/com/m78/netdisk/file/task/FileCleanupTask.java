@@ -10,6 +10,7 @@ import com.m78.netdisk.file.mapper.ItemMapper;
 import com.m78.netdisk.file.mapper.ItemVersionMapper;
 import com.m78.netdisk.file.mapper.UploadChunkMapper;
 import com.m78.netdisk.file.mapper.UploadTaskMapper;
+import com.m78.netdisk.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,6 +36,7 @@ public class FileCleanupTask {
     private final ItemMapper itemMapper;
     private final ItemVersionMapper itemVersionMapper;
     private final StorageService storageService;
+    private final UserMapper userMapper;
 
     /**
      * 每小时清理一次过期的上传任务
@@ -139,7 +141,13 @@ public class FileCleanupTask {
 
         // 删除 DB 记录
         itemMapper.deleteById(item.getId());
-        log.info("回收站自动清理: itemId={}, name={}, deletedAt={}",
-                item.getId(), item.getName(), item.getDeletedAt());
+
+        // 归还用户存储配额（非目录且非空大小）
+        if (!item.getIsDirectory() && item.getSize() != null && item.getSize() > 0) {
+            userMapper.subtractUsedBytes(item.getOwnerId(), item.getSize());
+        }
+
+        log.info("回收站自动清理: itemId={}, name={}, deletedAt={}, ownerId={}",
+                item.getId(), item.getName(), item.getDeletedAt(), item.getOwnerId());
     }
 }

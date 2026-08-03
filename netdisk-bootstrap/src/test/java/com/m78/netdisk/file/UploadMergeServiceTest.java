@@ -1,5 +1,6 @@
 package com.m78.netdisk.file;
 
+import com.m78.netdisk.common.client.RagClient;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.po.UploadChunk;
 import com.m78.netdisk.file.domain.po.UploadTask;
@@ -39,6 +40,7 @@ class UploadMergeServiceTest {
     @Mock private UploadChunkMapper uploadChunkMapper;
     @Mock private StorageService storageService;
     @Mock private UserMapper userMapper;
+    @Mock private RagClient ragClient;
 
     @InjectMocks
     private UploadMergeService mergeService;
@@ -59,7 +61,7 @@ class UploadMergeServiceTest {
         com.m78.netdisk.file.service.impl.FileServiceImpl fs =
                 new com.m78.netdisk.file.service.impl.FileServiceImpl(
                         itemMapper, null, uploadTaskMapper,
-                        uploadChunkMapper, storageService, userMapper, null, mergeService);
+                        uploadChunkMapper, storageService, userMapper, null, mergeService, ragClient);
 
         java.lang.reflect.Method method = com.m78.netdisk.file.service.impl.FileServiceImpl.class
                 .getMethod("completeUpload", Long.class, Long.class);

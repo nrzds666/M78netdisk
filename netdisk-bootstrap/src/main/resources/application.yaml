@@ -1,5 +1,6 @@
 server:
-  port: 8080
+  port: 8081
+  shutdown: graceful
 spring:
   profiles:
     active: dev
@@ -8,16 +9,12 @@ spring:
   datasource:
     url: jdbc:mysql://192.168.191.130:3306/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=300000
     username: root
-    password: ${DB_PASSWORD:942649}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       max-lifetime: 25000
       idle-timeout: 20000
       connection-test-query: SELECT 1
-  redis:
-    host: 192.168.191.130
-    port: 6379
-    timeout: 3000ms
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -25,29 +22,70 @@ spring:
     multipart:
       max-file-size: 2GB
       max-request-size: 2GB
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          model: deepseek-chat
+  data:
+    redis:
+      host: 192.168.191.130
+      port: 6379
+      timeout: 3s
+
+rag:
+  service:
+    enabled: true
+    url: http://localhost:8000
+
+doc-generator:
+  url: http://localhost:8001
+  connect-timeout: 3s
+  read-timeout: 30s
 
 netdisk:
+  comfyui:
+    base-url: http://localhost:8188          # ComfyUI 服务地址
+    connect-timeout: 5s                      # 连接超时（秒）
+    read-timeout: 300s                       # 读取/轮询超时（秒）
+    poll-interval-ms: 1000                   # 初始轮询间隔（毫秒）
+    poll-max-interval-ms: 5000               # 最大轮询间隔（毫秒），指数退避上限
+    poll-timeout: 120                       # 最大轮询总时长（秒）
+    default-width: 768                       # 默认宽度
+    default-height: 768                      # 默认高度
+    default-steps: 6                         # SDXL Turbo 步数，推荐 2-8
+    default-cfg: 1.0                         # CFG Scale，SDXL Turbo 推荐 1.0
+    default-sampler: euler                   # 采样器
+    default-scheduler: karras                # 调度器
+    modelFileName: sd_xl_turbo_1.0_fp16.safetensors  # 模型文件名
+    default-negative-prompt: blurry, low quality, worst quality, low resolution, jpeg artifacts, compression artifacts, distorted, ugly, bad anatomy, watermark, text, extra fingers, malformed hands
   jwt:
-    secret: ${JWT_SECRET:M78NetdiskJwtSecretKeyMustBeAtLeast256BitsLongForHS256Algorithm!!}
+    secret: ${JWT_SECRET}
     issuer: m78-netdisk
     access-token-expiration: 86400000        # 24小时
     refresh-token-expiration: 2592000000     # 30天
   default-quota: 10737418240                 # 10GB
   storage:
     type: oss                               # local | oss — 切换存储后端
+    ffmpeg-path: ffmpeg                     # FFmpeg 可执行文件路径（走系统 PATH 时设为 "ffmpeg"）
     local-path: ${user.home}/m78netdisk/storage
     oss:
-      endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
-      access-key-id: ${OSS_ACCESS_KEY_ID:LTAI5tRxr2ZBjDExX8KjkAk6}
-      access-key-secret: ${OSS_ACCESS_KEY_SECRET:LzZ7FOIJA1q7LkMW71DGz0P9tJiUzo}
-      bucket-name: ${OSS_BUCKET_NAME:dkd-nrzds}
+      endpoint: ${OSS_ENDPOINT}
+      access-key-id: ${OSS_ACCESS_KEY_ID}
+      access-key-secret: ${OSS_ACCESS_KEY_SECRET}
+      bucket-name: ${OSS_BUCKET_NAME}
 
 jodconverter:
   local:
     enabled: true
     office-home: "C:/Program Files/LibreOffice"
     port-numbers: 8100
-    max-tasks-per-process: 10
+    max-tasks-per-process: 0
+    clean-up-store-temps: false
+    delete-empty-office-temps: false
+    office-temp-dir: ${java.io.tmpdir}/m78-office-temp
 
 mybatis-plus:
   configuration:
@@ -58,3 +96,4 @@ mybatis-plus:
       id-type: auto
   mapper-locations:
     - classpath*:mapper/**/*.xml
+

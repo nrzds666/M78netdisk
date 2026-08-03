@@ -27,6 +27,8 @@ public class User implements Serializable {
 
     private Integer status;
 
+    private String role;
+
     private Long quotaBytes;
 
     private Long usedBytes;

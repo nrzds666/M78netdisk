@@ -91,7 +91,7 @@ class UserServiceImplTest {
                 u.setId(USER_ID);
                 return 1;
             }).when(userMapper).insert(any(User.class));
-            when(jwtTool.createAccessToken(any())).thenReturn("access-token");
+            when(jwtTool.createAccessToken(any(), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(any())).thenReturn("refresh-token");
 
             userService.register(dto);
@@ -121,7 +121,7 @@ class UserServiceImplTest {
                 u.setId(USER_ID);
                 return 1;
             }).when(userMapper).insert(any(User.class));
-            when(jwtTool.createAccessToken(any())).thenReturn("access-token");
+            when(jwtTool.createAccessToken(any(), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(any())).thenReturn("refresh-token");
 
             userService.register(dto);
@@ -142,7 +142,7 @@ class UserServiceImplTest {
             dto.setPassword("password123");
 
             when(userMapper.selectCount(any())).thenReturn(0L);
-            when(jwtTool.createAccessToken(USER_ID)).thenReturn("access-token");
+            when(jwtTool.createAccessToken(eq(USER_ID), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("refresh-token");
 
             // 模拟 insert 后 user 有 id
@@ -159,7 +159,7 @@ class UserServiceImplTest {
             assertEquals("access-token", result.getAccessToken());
             assertEquals("refresh-token", result.getRefreshToken());
             assertNotNull(result.getExpiresIn());
-            verify(jwtTool).createAccessToken(USER_ID);
+            verify(jwtTool).createAccessToken(eq(USER_ID), any());
             verify(jwtTool).createRefreshToken(USER_ID);
         }
     }
@@ -238,7 +238,7 @@ class UserServiceImplTest {
                     .setPasswordHash(encoder.encode(password));
 
             when(userMapper.selectOne(any())).thenReturn(user);
-            when(jwtTool.createAccessToken(USER_ID)).thenReturn("access-token");
+            when(jwtTool.createAccessToken(eq(USER_ID), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("refresh-token");
 
             UserLoginVO result = userService.login(dto);
@@ -247,7 +247,7 @@ class UserServiceImplTest {
             assertEquals(USER_ID, result.getUserId());
             assertEquals("access-token", result.getAccessToken());
             assertEquals("refresh-token", result.getRefreshToken());
-            verify(jwtTool).createAccessToken(USER_ID);
+            verify(jwtTool).createAccessToken(eq(USER_ID), any());
             verify(jwtTool).createRefreshToken(USER_ID);
         }
 
@@ -266,7 +266,7 @@ class UserServiceImplTest {
                     .setPasswordHash(encoder.encode(password));
 
             when(userMapper.selectOne(any())).thenReturn(user);
-            when(jwtTool.createAccessToken(USER_ID)).thenReturn("access-token");
+            when(jwtTool.createAccessToken(eq(USER_ID), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("refresh-token");
 
             userService.login(dto);
@@ -290,9 +290,9 @@ class UserServiceImplTest {
                     .setUsername("test")
                     .setStatus(1);
 
-            when(jwtTool.parseToken("valid-refresh-token")).thenReturn(USER_ID);
+            when(jwtTool.parseToken("valid-refresh-token")).thenReturn(new JwtTool.TokenPayload(USER_ID, "user"));
             when(userMapper.selectById(USER_ID)).thenReturn(user);
-            when(jwtTool.createAccessToken(USER_ID)).thenReturn("new-access");
+            when(jwtTool.createAccessToken(eq(USER_ID), any())).thenReturn("new-access");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("new-refresh");
 
             UserLoginVO result = userService.refreshToken("valid-refresh-token");
@@ -327,7 +327,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("已禁用用户的refresh token应拒绝")
         void refreshToken_shouldRejectDisabledUser() {
-            when(jwtTool.parseToken("some-token")).thenReturn(USER_ID);
+            when(jwtTool.parseToken("some-token")).thenReturn(new JwtTool.TokenPayload(USER_ID, "user"));
 
             User disabledUser = new User()
                     .setId(USER_ID)
@@ -343,7 +343,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("不存在的用户刷新token应拒绝")
         void refreshToken_shouldRejectNonExistentUser() {
-            when(jwtTool.parseToken("some-token")).thenReturn(USER_ID);
+            when(jwtTool.parseToken("some-token")).thenReturn(new JwtTool.TokenPayload(USER_ID, "user"));
             when(userMapper.selectById(USER_ID)).thenReturn(null);
 
             BizException ex = assertThrows(BizException.class,
@@ -514,7 +514,7 @@ class UserServiceImplTest {
                     .setPasswordHash(encoder.encode(password));
 
             when(userMapper.selectOne(any())).thenReturn(user);
-            when(jwtTool.createAccessToken(USER_ID)).thenReturn("access-token");
+            when(jwtTool.createAccessToken(eq(USER_ID), any())).thenReturn("access-token");
             when(jwtTool.createRefreshToken(USER_ID)).thenReturn("refresh-token");
 
             UserLoginVO result = userService.login(dto);

@@ -28,7 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -246,8 +246,12 @@ public class VaultServiceImpl implements IVaultService {
 
         itemMapper.insert(item);
 
-        // 原子增用量
-        userMapper.tryAddUsedBytes(userId, file.getSize());
+        // 原子增用量，超配额则回滚
+        if (userMapper.tryAddUsedBytes(userId, file.getSize()) == 0) {
+            itemMapper.deleteById(item.getId());
+            storageService.delete(storageKey);
+            throw new BizException("存储空间不足，无法上传文件");
+        }
 
         log.info("保险箱文件上传完成: userId={}, fileName={}, size={}, itemId={}",
                 userId, originalName, file.getSize(), item.getId());

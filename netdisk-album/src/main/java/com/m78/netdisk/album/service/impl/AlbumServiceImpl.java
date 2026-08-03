@@ -14,6 +14,7 @@ import com.m78.netdisk.album.mapper.AlbumItemMapper;
 import com.m78.netdisk.album.mapper.AlbumMapper;
 import com.m78.netdisk.album.service.IAlbumService;
 import com.m78.netdisk.common.exception.BizException;
+import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.po.Item;
 import com.m78.netdisk.file.mapper.ItemMapper;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class AlbumServiceImpl implements IAlbumService {
     private final AlbumMapper albumMapper;
     private final AlbumItemMapper albumItemMapper;
     private final ItemMapper itemMapper;
+    private final StorageService storageService;
 
     @Override
     @Transactional
@@ -138,7 +140,7 @@ public class AlbumServiceImpl implements IAlbumService {
                             .name(item.getName())
                             .mimeType(item.getMimeType())
                             .size(item.getSize())
-                            .thumbnailKey(item.getThumbnailKey())
+                            .thumbnailKey(mapThumbnailUrl(item.getThumbnailKey(), item.getId()))
                             .addedAt(ai.getAddedAt() != null ? ai.getAddedAt().toString() : null)
                             .build());
                 }
@@ -252,21 +254,40 @@ public class AlbumServiceImpl implements IAlbumService {
         }
     }
 
+    private String mapThumbnailUrl(String rawKey, Long itemId) {
+        if (rawKey == null) return null;
+        String publicUrl = storageService.getPublicUrl(rawKey);
+        if (publicUrl != null) return publicUrl;
+        if (itemId != null) return "/api/files/thumbnail/" + itemId;
+        return null;
+    }
+
     private AlbumVO toAlbumVO(Album album) {
         if (album == null) return null;
 
         // Get cover thumbnail
         String coverThumbnailKey = null;
         Long coverItemId = album.getCoverItemId();
+        String rawKey = null;
+        Long mapItemId = null;
         if (coverItemId != null) {
             Item coverItem = itemMapper.selectById(coverItemId);
             if (coverItem != null) {
-                coverThumbnailKey = coverItem.getThumbnailKey();
+                rawKey = coverItem.getThumbnailKey();
+                mapItemId = coverItem.getId();
             }
         } else {
-            // Auto-pick latest item's thumbnail
-            coverThumbnailKey = albumItemMapper.selectLatestThumbnailKey(album.getId());
+            // Auto-pick: get latest item's thumbnail with its itemId
+            Long latestId = albumItemMapper.selectLatestItemId(album.getId());
+            if (latestId != null) {
+                Item latestItem = itemMapper.selectById(latestId);
+                if (latestItem != null) {
+                    rawKey = latestItem.getThumbnailKey();
+                    mapItemId = latestItem.getId();
+                }
+            }
         }
+        coverThumbnailKey = mapThumbnailUrl(rawKey, mapItemId);
 
         // Get item count
         int itemCount = albumMapper.countItems(album.getId());

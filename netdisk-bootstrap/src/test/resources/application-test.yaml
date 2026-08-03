@@ -1,0 +1,15 @@
+# M78 NetDisk 测试环境配置
+spring:
+  datasource:
+    password: test
+
+netdisk:
+  jwt:
+    secret: TestJwtSecretKeyMustBeAtLeast256BitsLongForHS256Algorithm!!
+  storage:
+    type: local
+    oss:
+      endpoint: oss-cn-test.aliyuncs.com
+      access-key-id: test-access-key
+      access-key-secret: test-access-secret
+      bucket-name: test-bucket

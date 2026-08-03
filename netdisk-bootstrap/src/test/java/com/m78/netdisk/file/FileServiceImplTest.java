@@ -24,6 +24,8 @@ import com.m78.netdisk.file.service.impl.UploadMergeService;
 import com.m78.netdisk.user.domain.po.User;
 import com.m78.netdisk.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -471,5 +473,120 @@ class FileServiceImplTest {
         verify(uploadTaskMapper).insert(captor.capture());
         assertTrue(captor.getValue().getStoragePrefix().contains("/audio/"),
                 "expected /audio/ in prefix, got: " + captor.getValue().getStoragePrefix());
+    }
+
+    // ========== Fix: resolveMimeType / getDownloadInfo mime inference ==========
+
+    @Nested
+    @DisplayName("resolveMimeType")
+    class ResolveMimeTypeTest {
+
+        @Test
+        @DisplayName(".mp4 with application/octet-stream → video/mp4")
+        void mp4OctetStreamShouldResolveToVideo() {
+            assertEquals("video/mp4",
+                    FileServiceImpl.resolveMimeType("video.mp4", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName(".mp4 with null → video/mp4")
+        void mp4NullShouldResolveToVideo() {
+            assertEquals("video/mp4",
+                    FileServiceImpl.resolveMimeType("video.mp4", null));
+        }
+
+        @Test
+        @DisplayName(".avi → video/x-msvideo")
+        void aviShouldResolveToVideo() {
+            assertEquals("video/x-msvideo",
+                    FileServiceImpl.resolveMimeType("movie.avi", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName(".webm → video/webm")
+        void webmShouldResolveToVideo() {
+            assertEquals("video/webm",
+                    FileServiceImpl.resolveMimeType("clip.webm", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName("already correct mimeType → not overwritten")
+        void correctMimeTypeShouldNotBeOverwritten() {
+            assertEquals("video/mp4",
+                    FileServiceImpl.resolveMimeType("video.mp4", "video/mp4"));
+        }
+
+        @Test
+        @DisplayName("unknown extension → keep fallback")
+        void unknownExtensionShouldKeepFallback() {
+            assertEquals("application/octet-stream",
+                    FileServiceImpl.resolveMimeType("data.bin", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName("no extension → keep fallback")
+        void noExtensionShouldKeepFallback() {
+            assertEquals("application/octet-stream",
+                    FileServiceImpl.resolveMimeType("README", "application/octet-stream"));
+        }
+    }
+
+    @Nested
+    @DisplayName("getDownloadInfo mime inference")
+    class GetDownloadInfoMimeTest {
+
+        @Test
+        @DisplayName("should infer video/mp4 for .mp4 with octet-stream mimeType")
+        void shouldInferMimeForMp4OctetStream() {
+            Item item = new Item()
+                    .setId(ITEM_ID)
+                    .setOwnerId(OWNER_ID)
+                    .setName("video.mp4")
+                    .setMimeType("application/octet-stream")
+                    .setStorageKey("uploads/test/video.mp4")
+                    .setSize(1024L)
+                    .setIsDirectory(false);
+            when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+            var result = fileService.getDownloadInfo(OWNER_ID, ITEM_ID);
+
+            assertEquals("video/mp4", result.getMimeType());
+        }
+
+        @Test
+        @DisplayName("should keep existing video/mp4")
+        void shouldKeepExistingVideoMime() {
+            Item item = new Item()
+                    .setId(ITEM_ID)
+                    .setOwnerId(OWNER_ID)
+                    .setName("video.mp4")
+                    .setMimeType("video/mp4")
+                    .setStorageKey("uploads/test/video.mp4")
+                    .setSize(1024L)
+                    .setIsDirectory(false);
+            when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+            var result = fileService.getDownloadInfo(OWNER_ID, ITEM_ID);
+
+            assertEquals("video/mp4", result.getMimeType());
+        }
+
+        @Test
+        @DisplayName("should not affect files with correct mime type")
+        void shouldNotAffectPdf() {
+            Item item = new Item()
+                    .setId(ITEM_ID)
+                    .setOwnerId(OWNER_ID)
+                    .setName("doc.pdf")
+                    .setMimeType("application/pdf")
+                    .setStorageKey("uploads/test/doc.pdf")
+                    .setSize(1024L)
+                    .setIsDirectory(false);
+            when(itemMapper.selectById(ITEM_ID)).thenReturn(item);
+
+            var result = fileService.getDownloadInfo(OWNER_ID, ITEM_ID);
+
+            assertEquals("application/pdf", result.getMimeType());
+        }
     }
 }

@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.m78.netdisk.common.exception.BizException;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -35,23 +36,35 @@ public class JwtTool {
 
     private static final String TOKEN_PREFIX = "token:";
 
+    @Data
+    @AllArgsConstructor
+    public static class TokenPayload {
+        private Long userId;
+        private String role;
+    }
+
     public JwtTool(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
 
     private SecretKey getSigningKey() {
         if (StrUtil.isEmpty(secret)) {
-            throw new IllegalArgumentException("JWT secret is not configured");
+            throw new IllegalStateException("JWT secret is not configured");
         }
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException("JWT secret must be at least 32 bytes (got " + keyBytes.length + ")");
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String createAccessToken(Long userId) {
+    public String createAccessToken(Long userId, String role) {
         Date now = new Date();
         String token = Jwts.builder()
                 .issuer(issuer)
                 .subject(String.valueOf(userId))
                 .claim("type", "access")
+                .claim("role", role != null ? role : "user")
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + accessTokenExpMs))
                 .signWith(getSigningKey())
@@ -83,16 +96,18 @@ public class JwtTool {
                 .signWith(getSigningKey())
                 .compact();
 
-        // refresh token 存 Redis
+        // refresh token 存 Redis，key 包含 token hash 避免多设备覆盖
+        String tokenHash = Integer.toHexString(token.hashCode());
+        String redisKey = TOKEN_PREFIX + "refresh:" + userId + ":" + tokenHash;
         redisTemplate.opsForValue().set(
-                TOKEN_PREFIX + "refresh:" + userId,
+                redisKey,
                 token,
                 refreshTokenExpMs, TimeUnit.MILLISECONDS);
 
         return token;
     }
 
-    public Long parseToken(String token) {
+    public TokenPayload parseToken(String token) {
         if (StrUtil.isBlank(token)) {
             throw new BizException(401, "令牌不能为空");
         }
@@ -105,25 +120,44 @@ public class JwtTool {
 
             Long userId = Long.parseLong(jws.getPayload().getSubject());
             String type = jws.getPayload().get("type", String.class);
+            String role = jws.getPayload().get("role", String.class);
 
             // 校验 Redis 中是否存在该 token
             boolean valid;
             if ("refresh".equals(type)) {
-                String saved = redisTemplate.opsForValue().get(TOKEN_PREFIX + "refresh:" + userId);
-                valid = token.equals(saved);
+                // 遍历所有该用户的 refresh token key 来查找匹配
+                String pattern = TOKEN_PREFIX + "refresh:" + userId + ":*";
+                Set<String> keys = redisTemplate.keys(pattern);
+                valid = false;
+                if (keys != null) {
+                    for (String key : keys) {
+                        String saved = redisTemplate.opsForValue().get(key);
+                        if (token.equals(saved)) {
+                            valid = true;
+                            break;
+                        }
+                    }
+                }
             } else {
                 String saved = redisTemplate.opsForValue().get(TOKEN_PREFIX + "access:" + userId + ":" + token);
-                // key 已包含完整 token 字符串，key 存在即代表 token 有效
                 valid = saved != null;
             }
 
             if (!valid) {
-                throw new BizException(401, "令牌已失效");
+                // access token 失效 → 可刷新；refresh token 失效 → 需重新登录
+                if ("refresh".equals(type)) {
+                    throw new BizException(401, "刷新令牌已失效，请重新登录");
+                }
+                throw new BizException(401, "访问令牌已失效");
             }
 
-            return userId;
+            return new TokenPayload(userId, role);
         } catch (BizException e) {
             throw e;
+        } catch (ExpiredJwtException e) {
+            // JWT 签名过期，在 parseSignedClaims 阶段就抛出了，无法知道 type
+            // 统一提示过期，前端可根据上下文决定是否尝试刷新
+            throw new BizException(401, "令牌已过期");
         } catch (NumberFormatException e) {
             throw new BizException(401, "无效的令牌");
         } catch (JwtException e) {
@@ -132,13 +166,21 @@ public class JwtTool {
     }
 
     public void logout(Long userId) {
-        // 使用 Set 存储用户的 access token key，避免 KEYS 阻塞
         String userTokenSetKey = TOKEN_PREFIX + "tokens:access:" + userId;
         Set<String> tokenKeys = redisTemplate.opsForSet().members(userTokenSetKey);
         if (tokenKeys != null && !tokenKeys.isEmpty()) {
             redisTemplate.delete(tokenKeys);
         }
         redisTemplate.delete(userTokenSetKey);
-        redisTemplate.delete(TOKEN_PREFIX + "refresh:" + userId);
+        // Clean up all device-specific refresh tokens
+        Set<String> refreshKeys = redisTemplate.keys(TOKEN_PREFIX + "refresh:" + userId + ":*");
+        if (refreshKeys != null && !refreshKeys.isEmpty()) {
+            redisTemplate.delete(refreshKeys);
+        }
+    }
+
+    /** 兼容旧调用：仅获取 userId */
+    public Long parseTokenUserId(String token) {
+        return parseToken(token).getUserId();
     }
 }

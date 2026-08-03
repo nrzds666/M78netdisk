@@ -3,6 +3,9 @@ package com.m78.netdisk.file.service.impl;
 import com.m78.netdisk.common.exception.BizException;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.file.domain.po.Item;
+import com.m78.netdisk.file.event.FileCreatedEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import com.m78.netdisk.file.domain.po.ItemVersion;
 import com.m78.netdisk.file.domain.po.UploadChunk;
 import com.m78.netdisk.file.domain.po.UploadTask;
@@ -39,6 +42,9 @@ public class UploadMergeService {
     private final UploadChunkMapper uploadChunkMapper;
     private final StorageService storageService;
     private final UserMapper userMapper;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 异步执行分片合并 + 物品创建（新事务）。
@@ -89,6 +95,9 @@ public class UploadMergeService {
             task.setStatus("completed");
             uploadTaskMapper.updateById(task);
 
+            if (eventPublisher != null) {
+                eventPublisher.publishEvent(new FileCreatedEvent(this, item));
+            }
             log.info("上传完成(异步): userId={}, fileName={}, size={}, itemId={}",
                     ownerId, task.getFileName(), task.getFileSize(), item.getId());
         } catch (Exception e) {

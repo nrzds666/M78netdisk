@@ -2,6 +2,7 @@ package com.m78.netdisk.common.exception;
 
 import com.m78.netdisk.common.domain.R;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -12,7 +13,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.stream.Collectors;
 
 /**
@@ -65,6 +66,15 @@ public class GlobalExceptionHandler {
     public R<Void> handleMultipartException(MultipartException e) {
         log.warn("文件上传大小超过限制: {}", e.getMessage());
         return R.fail(400, "文件大小超过服务器限制（最大2GB）");
+    }
+
+    /**
+     * 客户端连接断开（如预览视频/下载文件时浏览器关闭）→ 不写 response，避免
+     * Content-Type 不匹配导致的二次异常（No converter for R with preset Content-Type）
+     */
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbort(ClientAbortException e, HttpServletRequest request) {
+        log.warn("客户端连接断开 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
     }
 
     /**

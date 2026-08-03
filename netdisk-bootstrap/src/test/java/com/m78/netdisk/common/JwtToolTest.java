@@ -18,12 +18,13 @@ class JwtToolTest extends BaseTest {
     @Test
     void testCreateAndParseAccessToken() {
         Long userId = 42L;
-        String token = jwtTool.createAccessToken(userId);
+        String token = jwtTool.createAccessToken(userId, "admin");
         assertNotNull(token);
         assertFalse(token.isBlank());
 
-        Long parsed = jwtTool.parseToken(token);
-        assertEquals(userId, parsed);
+        JwtTool.TokenPayload parsed = jwtTool.parseToken(token);
+        assertEquals(userId, parsed.getUserId());
+        assertEquals("admin", parsed.getRole());
     }
 
     @Test
@@ -33,8 +34,17 @@ class JwtToolTest extends BaseTest {
         assertNotNull(token);
         assertFalse(token.isBlank());
 
-        Long parsed = jwtTool.parseToken(token);
-        assertEquals(userId, parsed);
+        JwtTool.TokenPayload parsed = jwtTool.parseToken(token);
+        assertEquals(userId, parsed.getUserId());
+        assertNull(parsed.getRole()); // refresh token doesn't carry role
+    }
+
+    @Test
+    void testCreateAccessTokenDefaultRole() {
+        Long userId = 55L;
+        String token = jwtTool.createAccessToken(userId, null);
+        JwtTool.TokenPayload parsed = jwtTool.parseToken(token);
+        assertEquals("user", parsed.getRole());
     }
 
     @Test
@@ -45,15 +55,14 @@ class JwtToolTest extends BaseTest {
 
     @Test
     void testParseExpiredToken() {
-        // Should throw BizException for expired tokens
         assertThrows(BizException.class, () ->
-                jwtTool.parseToken("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwidHlwZSI6ImFjY2VzcyIsImlhdCI6MTUwMDAwMDAwMCwiZXhwIjoxNTAwMDAwMDAxfQ.signature"));
+                jwtTool.parseToken("eyJhbG...ture"));
     }
 
     @Test
     void testLogoutThenTokenInvalid() {
         Long userId = 77L;
-        String token = jwtTool.createAccessToken(userId);
+        String token = jwtTool.createAccessToken(userId, "user");
         assertNotNull(token);
 
         jwtTool.logout(userId);
@@ -72,5 +81,12 @@ class JwtToolTest extends BaseTest {
     void testParseEmptyToken() {
         assertThrows(BizException.class, () ->
                 jwtTool.parseToken(""));
+    }
+
+    @Test
+    void testParseTokenUserId() {
+        Long userId = 88L;
+        String token = jwtTool.createAccessToken(userId, "user");
+        assertEquals(userId, jwtTool.parseTokenUserId(token));
     }
 }

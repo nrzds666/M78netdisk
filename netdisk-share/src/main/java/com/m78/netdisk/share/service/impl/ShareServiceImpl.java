@@ -25,7 +25,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -111,7 +110,9 @@ public class ShareServiceImpl implements IShareService {
 
     @Override
     @Transactional
-    public ShareVO accessShare(String shareToken, String password) {
+    public ShareVO
+
+    accessShare(String shareToken, String password) {
         Share share = shareMapper.selectValidShare(shareToken);
         if (share == null) {
             throw new BizException("分享链接不存在或已失效");
@@ -214,10 +215,21 @@ public class ShareServiceImpl implements IShareService {
             return singleResult.convert(this::itemToItemVO);
         }
 
-        // Folder share — list children of the shared folder or subfolder
+        // Folder share — validate parentId belongs to the shared folder hierarchy
         Long effectiveParentId = (parentId != null && parentId > 0) ? parentId : sharedItemId;
+        if (parentId != null && parentId > 0) {
+            Item parentItem = itemMapper.selectById(parentId);
+            if (parentItem == null || !isDescendantOf(parentItem.getId(), sharedItemId, ownerId)) {
+                throw new BizException("无权访问该分享目录");
+            }
+        }
 
         IPage<Item> itemPage = itemMapper.selectChildrenByOwnerId(page, ownerId, effectiveParentId);
+        // Filter out vaulted files from share browsing
+        List<Item> filtered = itemPage.getRecords().stream()
+                .filter(item -> !Boolean.TRUE.equals(item.getIsVaulted()))
+                .collect(java.util.stream.Collectors.toList());
+        itemPage.setRecords(filtered);
         return itemPage.convert(this::itemToItemVO);
     }
 
@@ -247,6 +259,9 @@ public class ShareServiceImpl implements IShareService {
         }
         if (item.getIsDeleted() != null && item.getIsDeleted()) {
             throw new BizException("文件已被删除");
+        }
+        if (Boolean.TRUE.equals(item.getIsVaulted())) {
+            throw new BizException("该文件已移入保险箱，分享链接已失效");
         }
 
         // Verify item is a descendant of the shared folder (or is the shared file itself)
@@ -286,50 +301,90 @@ public class ShareServiceImpl implements IShareService {
             throw new BizException("用户未登录");
         }
 
-        List<ItemVO> result = new ArrayList<>();
-
+        // Pre-check quota for all files
+        long totalSize = 0;
         for (Long itemId : itemIds) {
             Item original = itemMapper.selectById(itemId);
-            if (original == null || !original.getOwnerId().equals(share.getOwnerId())) {
-                throw new BizException("文件不存在: " + itemId);
-            }
+            if (original == null) continue;
             if (original.getIsDirectory()) {
                 throw new BizException("暂不支持保存文件夹，请选择具体文件: " + original.getName());
             }
             if (original.getIsDeleted() != null && original.getIsDeleted()) {
                 throw new BizException("文件已被删除: " + original.getName());
             }
-
-            // Verify item is part of this share
-            if (!isDescendantOf(share.getOwnerId(), itemId, share.getItemId())) {
-                throw new BizException("文件不属于该分享: " + original.getName());
+            if (original.getSize() != null) {
+                totalSize += original.getSize();
             }
+        }
 
-            // Copy the file content to a new storage key
-            String newStorageKey = "saves/" + UUID.randomUUID().toString().replace("-", "")
-                    + "/" + original.getName();
+        // Atomically check quota
+        if (userMapper.tryAddUsedBytes(currentUserId, totalSize) == 0) {
+            throw new BizException("存储空间不足，无法保存分享文件");
+        }
 
-            try (InputStream in = storageService.getInputStream(original.getStorageKey())) {
-                storageService.store(newStorageKey, in);
-            } catch (Exception e) {
-                throw new BizException("保存文件失败: " + original.getName());
+        // Quota acquired — now actually save. If any step fails, rollback.
+        List<ItemVO> result = new ArrayList<>();
+        java.util.List<Item> createdItems = new ArrayList<>();
+
+        try {
+            for (Long itemId : itemIds) {
+                Item original = itemMapper.selectById(itemId);
+                if (original == null || !original.getOwnerId().equals(share.getOwnerId())) {
+                    throw new BizException("文件不存在: " + itemId);
+                }
+                if (original.getIsDirectory()) {
+                    continue; // already checked above
+                }
+                if (original.getIsDeleted() != null && original.getIsDeleted()) {
+                    continue; // already checked above
+                }
+
+                // Verify item is part of this share
+                if (!isDescendantOf(share.getOwnerId(), itemId, share.getItemId())) {
+                    throw new BizException("文件不属于该分享: " + original.getName());
+                }
+
+                // Check name conflict in target user's space
+                if (itemMapper.countByName(currentUserId, null, original.getName()) > 0) {
+                    throw new BizException("根目录已存在同名文件: " + original.getName());
+                }
+
+                // 在同一 OSS 内复制文件（服务端复制，不经后端网络）
+                String newStorageKey = "saves/" + UUID.randomUUID().toString().replace("-", "")
+                        + "/" + original.getName();
+
+                try {
+                    storageService.copyObject(original.getStorageKey(), newStorageKey);
+                } catch (Exception e) {
+                    throw new BizException("保存文件失败: " + original.getName());
+                }
+
+                // Create a new Item record for the current user
+                Item newItem = new Item()
+                        .setOwnerId(currentUserId)
+                        .setParentId(null) // saved to root
+                        .setName(original.getName())
+                        .setIsDirectory(false)
+                        .setSize(original.getSize())
+                        .setMimeType(original.getMimeType())
+                        .setStorageKey(newStorageKey)
+                        .setPath("/" + original.getName())
+                        .setVersion(1)
+                        .setIsFromShare(true);
+
+                itemMapper.insert(newItem);
+                createdItems.add(newItem);
+                result.add(itemToItemVO(newItem));
             }
-
-            // Create a new Item record for the current user
-            Item newItem = new Item()
-                    .setOwnerId(currentUserId)
-                    .setParentId(null) // saved to root
-                    .setName(original.getName())
-                    .setIsDirectory(false)
-                    .setSize(original.getSize())
-                    .setMimeType(original.getMimeType())
-                    .setStorageKey(newStorageKey)
-                    .setPath("/" + original.getName())
-                    .setVersion(1)
-                    .setIsFromShare(true);
-
-            itemMapper.insert(newItem);
-            result.add(itemToItemVO(newItem));
+        } catch (Exception e) {
+            // Rollback: delete DB records and storage on failure
+            for (Item created : createdItems) {
+                itemMapper.deleteById(created.getId());
+                try { storageService.delete(created.getStorageKey()); } catch (Exception ignored) {}
+            }
+            // Refund quota
+            userMapper.subtractUsedBytes(currentUserId, totalSize);
+            throw e;
         }
 
         return result;

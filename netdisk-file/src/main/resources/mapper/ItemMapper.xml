@@ -40,7 +40,14 @@
         SELECT * FROM items
         WHERE owner_id = #{ownerId} AND NOT is_deleted AND NOT is_vaulted
         <if test="parentId != null">
-            AND parent_id = #{parentId}
+            <choose>
+                <when test="parentId == -1">
+                    <!-- parentId = -1: 不限文件夹，全量查 -->
+                </when>
+                <otherwise>
+                    AND parent_id = #{parentId}
+                </otherwise>
+            </choose>
         </if>
         <if test="parentId == null">
             AND parent_id IS NULL
