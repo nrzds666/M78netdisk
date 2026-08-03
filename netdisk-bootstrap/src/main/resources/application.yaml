@@ -7,7 +7,7 @@ spring:
   application:
     name: m78-netdisk
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=300000
+    url: jdbc:mysql://${spring.datasource.db-host:localhost}:${spring.datasource.db-port:3306}/m78netdisk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=300000
     username: root
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
