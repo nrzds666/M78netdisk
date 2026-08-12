@@ -172,7 +172,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { ChatDotRound, Close, Search, UserFilled, Document, Loading } from '@element-plus/icons-vue'
+import { ChatDotRound, Close, Search, UserFilled, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { streamChatMessage, saveDocument, confirmTempDocument } from '@/api/chat-stream'
 import { searchFiles } from '@/api/chat.js'
@@ -185,7 +185,7 @@ const CLICK_THRESHOLD = 5    // 移动 < 5px 视为点击而非拖拽
 const EDGE_IDLE_DELAY = 5000 // 边缘停留 5 秒后半隐藏
 const PANEL_W = 380
 const PANEL_H = 500
-const edgeTimer = null         // 边缘停留定时器
+let edgeTimer = null   // 边缘停留定时器（用 let 因为会被重新赋值）
 
 // ─── 状态 ───
 const state = ref('visible')   // 'visible' | 'hidden' | 'dialog'
@@ -619,17 +619,6 @@ async function openFilePreview(fileId) {
   }
 }
 
-// ─── 打开图片预览（新窗口）───
-async function openImagePreview(imgCard) {
-  try {
-    const token = localStorage.getItem('m78_token')
-    const url = imgCard.fileUrl + '?token=' + encodeURIComponent(token)
-    window.open(url, '_blank')
-  } catch (e) {
-    ElMessage.error('预览失败：' + e.message)
-  }
-}
-
 // ─── 下载图片 ───
 async function downloadImage(imgCard) {
   try {
@@ -650,25 +639,6 @@ async function downloadImage(imgCard) {
     ElMessage.error('下载失败：' + e.message)
   }
 }
-
-// ─── 分享图片 ───
-async function shareImage(imgCard) {
-  try {
-    const text = `我在 M78 网盘生成了这张图片：${imgCard.fileName}\n` +
-      `${imgCard.fileUrl}?token=${localStorage.getItem('m78_token')}`
-    if (navigator.share) {
-      await navigator.share({ title: '我的AI生成图片', text: text })
-    } else {
-      await navigator.clipboard.writeText(text)
-      ElMessage.success('链接已复制到剪贴板！')
-    }
-  } catch (e) {
-    ElMessage.error('分享失败：' + e.message)
-  }
-}
-
-// ─── 打开图片生成卡片 ───
-// （可选：如果需要显示生成中的卡片流）
 
 // ─── 格式化大小 ───
 function formatSize(bytes) {
