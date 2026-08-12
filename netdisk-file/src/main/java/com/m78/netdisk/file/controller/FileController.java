@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.utils.UserContext;
 import com.m78.netdisk.common.storage.StorageService;
+import com.m78.netdisk.common.log.AuditLog;
 import com.m78.netdisk.file.domain.dto.*;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
@@ -92,16 +93,19 @@ public class FileController {
                 query, mimePrefix, mimeTypes, excludePrefix, dateFrom, dateTo));
     }
 
+    @AuditLog(action = "FILE_CREATE", detail = "#dto.name")
     @PostMapping("/folder")
     public R<ItemVO> createFolder(@Valid @RequestBody CreateFolderDTO dto) {
         return R.ok(fileService.createFolder(UserContext.getUserId(), dto));
     }
 
+    @AuditLog(action = "FILE_RENAME", detail = "#dto.id")
     @PutMapping("/rename")
     public R<ItemVO> rename(@Valid @RequestBody RenameItemDTO dto) {
         return R.ok(fileService.rename(UserContext.getUserId(), dto));
     }
 
+    @AuditLog(action = "FILE_MOVE", detail = "#dto.ids")
     @PutMapping("/move")
     public R<Void> move(@Valid @RequestBody MoveItemsDTO dto) {
         fileService.move(UserContext.getUserId(), dto);
@@ -136,18 +140,21 @@ public class FileController {
         }
     }
 
+    @AuditLog(action = "FILE_DELETE", detail = "#ids")
     @DeleteMapping("/trash")
     public R<Void> deleteToTrash(@RequestParam List<Long> ids) {
         fileService.deleteToTrash(UserContext.getUserId(), ids);
         return R.ok();
     }
 
+    @AuditLog(action = "FILE_RESTORE", detail = "#ids")
     @PostMapping("/restore")
     public R<Void> restoreFromTrash(@RequestParam List<Long> ids) {
         fileService.restoreFromTrash(UserContext.getUserId(), ids);
         return R.ok();
     }
 
+    @AuditLog(action = "FILE_PERMANENT_DELETE", detail = "#ids")
     @DeleteMapping("/permanent")
     public R<Void> permanentlyDelete(@RequestParam List<Long> ids) {
         fileService.permanentlyDelete(UserContext.getUserId(), ids);
@@ -251,6 +258,7 @@ public class FileController {
      * @param parentId 目标目录ID，传 0 或 null 表示根目录
      * @return 文件信息
      */
+    @AuditLog(action = "FILE_UPLOAD")
     @PostMapping("/upload")
     public R<ItemVO> uploadFile(
             @RequestParam("file") MultipartFile file,

@@ -5,6 +5,7 @@ import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.common.utils.JwtTool;
 import com.m78.netdisk.common.utils.UserContext;
+import com.m78.netdisk.common.log.AuditLog;
 import com.m78.netdisk.file.domain.vo.FileDownloadVO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.share.domain.dto.CreateShareDTO;
@@ -34,11 +35,13 @@ public class ShareController {
     private final StorageService storageService;
     private final JwtTool jwtTool;
 
+    @AuditLog(action = "SHARE_CREATE", detail = "#dto.itemIds")
     @PostMapping
     public R<ShareVO> createShare(@Valid @RequestBody CreateShareDTO dto) {
         return R.ok(shareService.createShare(UserContext.getUserId(), dto));
     }
 
+    @AuditLog(action = "SHARE_CANCEL", itemId = "#id")
     @PostMapping("/{id}/cancel")
     public R<Void> cancelShare(@PathVariable Long id) {
         shareService.cancelShare(UserContext.getUserId(), id);

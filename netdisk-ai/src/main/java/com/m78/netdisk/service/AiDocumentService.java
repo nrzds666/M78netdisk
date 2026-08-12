@@ -17,11 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @Slf4j
 @Service
@@ -37,6 +33,9 @@ public class AiDocumentService {
     private static final String REDIS_KEY_PREFIX = "temp:doc:";
     private static final Duration REDIS_TTL = Duration.ofMinutes(30);
 
+    // 支持的格式白名单
+    private static final Set<String> SUPPORTED_FORMATS = Set.of("md", "txt", "docx", "xlsx", "html", "json", "csv");
+
     public AiDocumentService(IFileService fileService,
                              StorageService storageService,
                              @Qualifier("docGeneratorRestTemplate") RestTemplate docGenRestTemplate,
@@ -51,8 +50,6 @@ public class AiDocumentService {
         this.objectMapper = objectMapper;
     }
 
-    // ==================== 临时文档生成（调 Python 服务） ====================
-
     /**
      * 调用 Python 文档生成服务，生成临时文件，返回元数据。
      * docContext != null 时覆盖同一 tempFileId。
@@ -62,6 +59,12 @@ public class AiDocumentService {
                                                 DocContext docContext) {
         if (content == null || content.isBlank()) {
             throw new BizException("文档内容不能为空");
+        }
+
+        // format 白名单校验
+        String normalizedFormat = normalizeFormat(fileType);
+        if (normalizedFormat == null) {
+            throw new BizException("不支持的文档格式: " + fileType + "，支持格式: " + SUPPORTED_FORMATS);
         }
 
         // 1. 确定 tempFileId（修改模式复用旧的）
@@ -76,7 +79,7 @@ public class AiDocumentService {
         String safeName = sanitizeFileName(fileName);
         Map<String, Object> reqBody = new LinkedHashMap<>();
         reqBody.put("content", content);
-        reqBody.put("format", fileType);
+        reqBody.put("format", normalizedFormat);
         reqBody.put("fileName", safeName);
 
         Map<String, Object> resp;
@@ -97,15 +100,16 @@ public class AiDocumentService {
                 ? ((Number) resp.get("fileSize")).longValue() : 0L;
 
         // 3. 写入 Redis
+        int round = docContext != null ? docContext.getRound() : 0;
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("userId", userId);
         meta.put("filePath", filePath);
-        meta.put("fileName", safeName + "." + fileType);
+        meta.put("fileName", safeName + "." + normalizedFormat);
         meta.put("fileSize", fileSize);
-        meta.put("fileType", fileType);
+        meta.put("fileType", normalizedFormat);
         meta.put("originalText", content);
         meta.put("createdAt", System.currentTimeMillis());
-        meta.put("round", docContext != null ? docContext.getRound() : 0);
+        meta.put("round", round);
 
         try {
             String json = objectMapper.writeValueAsString(meta);
@@ -115,9 +119,8 @@ public class AiDocumentService {
             throw new BizException("临时文档存储失败");
         }
 
-        int round = docContext != null ? docContext.getRound() : 0;
-        TempDocumentVO vo = new TempDocumentVO(tempFileId, safeName + "." + fileType,
-                fileSize, fileType, round, filePath);
+        TempDocumentVO vo = new TempDocumentVO(tempFileId, safeName + "." + normalizedFormat,
+                fileSize, normalizedFormat, round, filePath);
         log.info("生成临时文档: tempFileId={}, file={}, size={}, round={}",
                 tempFileId, vo.getFileName(), fileSize, round);
         return vo;
@@ -218,7 +221,6 @@ public class AiDocumentService {
     // ==================== 旧版保存（保留兼容，已改用 Python 服务） ====================
 
     public ItemVO saveDocument(Long userId, String content, String fileName, Long parentId) {
-        // 旧版保存：通过 Python 服务生成文件后保存到网盘（不经过临时文档流程）
         if (content == null || content.isBlank()) {
             throw new BizException("文档内容不能为空");
         }
@@ -257,7 +259,7 @@ public class AiDocumentService {
         return item;
     }
 
-    // ==================== 文件搜索 & 文档读取（不变） ====================
+    // ==================== 文件搜索 & 文档读取 ====================
 
     public List<ItemVO> searchFiles(Long userId, String query, int limit) {
         if (query == null || query.isBlank()) return Collections.emptyList();
@@ -303,7 +305,18 @@ public class AiDocumentService {
         };
     }
 
-    /** 文件名安全清洗：去除 Windows 非法字符，防路径穿越 */
+    /**
+     * 规范化格式并校验白名单，返回 null 表示不支持。
+     */
+    private String normalizeFormat(String format) {
+        if (format == null || format.isBlank()) return null;
+        String normalized = format.trim().toLowerCase();
+        return SUPPORTED_FORMATS.contains(normalized) ? normalized : null;
+    }
+
+    /**
+     * 文件名安全清洗：去除 Windows 非法字符，防路径穿越
+     */
     static String sanitizeFileName(String title) {
         if (title == null || title.isBlank()) return "未命名文档";
         String safe = title
@@ -315,7 +328,9 @@ public class AiDocumentService {
         return safe;
     }
 
-    /** 安全比较 Redis 反序列化的 userId（Integer vs Long 问题） */
+    /**
+     * 安全比较 Redis 反序列化的 userId（Integer vs Long 问题）
+     */
     private static boolean userIdMatches(Long userId, Map<String, Object> meta) {
         Object stored = meta.get("userId");
         if (stored instanceof Number n) {

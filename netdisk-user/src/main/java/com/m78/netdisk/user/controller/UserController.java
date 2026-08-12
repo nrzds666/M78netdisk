@@ -4,6 +4,7 @@ import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.storage.StorageService;
 import com.m78.netdisk.common.utils.CaptchaUtil;
 import com.m78.netdisk.common.utils.UserContext;
+import com.m78.netdisk.common.log.AuditLog;
 import com.m78.netdisk.user.domain.dto.LoginFormDTO;
 import com.m78.netdisk.user.domain.dto.RegisterFormDTO;
 import com.m78.netdisk.user.domain.vo.UserInfoVO;
@@ -36,6 +37,7 @@ public class UserController {
 
     // ========== 认证 ==========
 
+    @AuditLog(action = "USER_REGISTER", detail = "#formDTO.username")
     @PostMapping("/register")
     public R<UserLoginVO> register(@Valid @RequestBody RegisterFormDTO formDTO) {
         if (!captchaUtil.verify(formDTO.getCaptchaKey(), formDTO.getCaptchaCode())) {
@@ -44,6 +46,7 @@ public class UserController {
         return R.ok(userService.register(formDTO));
     }
 
+    @AuditLog(action = "USER_LOGIN")
     @PostMapping("/login")
     public R<UserLoginVO> login(@Valid @RequestBody LoginFormDTO formDTO) {
         if (!captchaUtil.verify(formDTO.getCaptchaKey(), formDTO.getCaptchaCode())) {
@@ -57,6 +60,7 @@ public class UserController {
         return R.ok(userService.refreshToken(refreshToken));
     }
 
+    @AuditLog(action = "USER_LOGOUT")
     @PostMapping("/logout")
     public R<Void> logout() {
         Long userId = UserContext.getUserId();
@@ -78,6 +82,7 @@ public class UserController {
         return R.ok(userService.getUserInfo(userId));
     }
 
+    @AuditLog(action = "USER_PROFILE_UPDATE", detail = "#username")
     @PutMapping("/profile")
     public R<Void> updateProfile(@RequestParam String username) {
         Long userId = UserContext.getUserId();
@@ -88,6 +93,7 @@ public class UserController {
         return R.ok();
     }
 
+    @AuditLog(action = "USER_PASSWORD_CHANGE")
     @PutMapping("/password")
     public R<Void> updatePassword(@RequestParam String oldPassword,
                                    @RequestParam String newPassword) {

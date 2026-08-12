@@ -27,6 +27,10 @@ public class RagServiceProperties {
     private int retrievalMultiplier = 4;
     /** 上下文窗口大小（压缩时保留相关句前后多少句，默认 1） */
     private int compressContextWindow = 1;
+    /** 检索结果注入上下文的最低相关度阈值（低于此值的结果丢弃） */
+    private double scoreThreshold = 0.3;
+    /** 注入上下文的最大总字符数（超出截断） */
+    private int contextMaxChars = 3000;
     /** 支持 RAG 索引的文件扩展名白名单 */
     private List<String> supportedExtensions = List.of(
             "pdf", "docx", "pptx", "txt", "md", "csv", "py", "js", "ts", "java",

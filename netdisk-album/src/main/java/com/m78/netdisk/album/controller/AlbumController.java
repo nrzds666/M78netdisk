@@ -10,6 +10,7 @@ import com.m78.netdisk.album.service.IAlbumShareService;
 import com.m78.netdisk.album.service.IAlbumService;
 import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.utils.UserContext;
+import com.m78.netdisk.common.log.AuditLog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +30,7 @@ public class AlbumController {
     private final IAlbumService albumService;
     private final IAlbumShareService albumShareService;
 
+    @AuditLog(action = "ALBUM_CREATE", detail = "#dto.name")
     @PostMapping
     public R<AlbumVO> createAlbum(@Valid @RequestBody CreateAlbumDTO dto) {
         return R.ok(albumService.createAlbum(UserContext.getUserId(), dto));
@@ -55,12 +57,14 @@ public class AlbumController {
         return R.ok(albumService.updateAlbum(UserContext.getUserId(), id, dto));
     }
 
+    @AuditLog(action = "ALBUM_DELETE", itemId = "#id")
     @DeleteMapping("/{id}")
     public R<Void> deleteAlbum(@PathVariable Long id) {
         albumService.deleteAlbum(UserContext.getUserId(), id);
         return R.ok();
     }
 
+    @AuditLog(action = "ALBUM_ADD_ITEM", detail = "#dto.itemIds")
     @PostMapping("/{id}/items")
     public R<Void> addItems(@PathVariable Long id,
                              @Valid @RequestBody AddItemsDTO dto) {
@@ -68,6 +72,7 @@ public class AlbumController {
         return R.ok();
     }
 
+    @AuditLog(action = "ALBUM_REMOVE_ITEM", detail = "#itemIds")
     @DeleteMapping("/{id}/items")
     public R<Void> removeItems(@PathVariable Long id,
                                 @RequestParam List<Long> itemIds) {
@@ -75,6 +80,7 @@ public class AlbumController {
         return R.ok();
     }
 
+    @AuditLog(action = "ALBUM_SET_COVER", detail = "#itemId")
     @PutMapping("/{id}/cover")
     public R<AlbumVO> setCover(@PathVariable Long id,
                                 @RequestParam Long itemId) {

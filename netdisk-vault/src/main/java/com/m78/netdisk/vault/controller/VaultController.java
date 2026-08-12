@@ -3,6 +3,7 @@ package com.m78.netdisk.vault.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.m78.netdisk.common.domain.R;
 import com.m78.netdisk.common.utils.UserContext;
+import com.m78.netdisk.common.log.AuditLog;
 import com.m78.netdisk.file.domain.dto.CreateFolderDTO;
 import com.m78.netdisk.file.domain.vo.ItemVO;
 import com.m78.netdisk.vault.domain.dto.SetupVaultDTO;
@@ -23,18 +24,21 @@ public class VaultController {
 
     private final IVaultService vaultService;
 
+    @AuditLog(action = "VAULT_SETUP")
     @PostMapping("/setup")
     public R<Void> setup(@Valid @RequestBody SetupVaultDTO dto) {
         vaultService.setup(UserContext.getUserId(), dto);
         return R.ok();
     }
 
+    @AuditLog(action = "VAULT_UNLOCK")
     @PostMapping("/unlock")
     public R<Void> unlock(@Valid @RequestBody UnlockVaultDTO dto) {
         vaultService.unlock(UserContext.getUserId(), dto.getPassword());
         return R.ok();
     }
 
+    @AuditLog(action = "VAULT_LOCK")
     @PostMapping("/lock")
     public R<Void> lock() {
         vaultService.lock(UserContext.getUserId());
@@ -59,6 +63,7 @@ public class VaultController {
         return R.ok(vaultService.createFolder(UserContext.getUserId(), dto));
     }
 
+    @AuditLog(action = "VAULT_UPLOAD", detail = "#file.originalFilename")
     @PostMapping("/files/upload")
     public R<ItemVO> uploadFile(
             @RequestParam("file") MultipartFile file,
@@ -71,6 +76,7 @@ public class VaultController {
         vaultService.downloadFile(UserContext.getUserId(), id, response);
     }
 
+    @AuditLog(action = "VAULT_REMOVE", itemId = "#itemId")
     @PutMapping("/files/remove")
     public R<Void> removeFromVault(@RequestParam Long itemId) {
         vaultService.removeFromVault(UserContext.getUserId(), itemId);
